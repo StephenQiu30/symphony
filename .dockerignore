@@ -1,0 +1,11 @@
+.git
+.github
+.env
+.symphony-workspaces
+log
+elixir/_build
+elixir/deps
+elixir/doc
+elixir/log
+elixir/cover
+elixir/.elixir_ls

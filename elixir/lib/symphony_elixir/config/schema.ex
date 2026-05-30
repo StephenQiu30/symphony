@@ -369,6 +369,7 @@ defmodule SymphonyElixir.Config.Schema do
     tracker = %{
       settings.tracker
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
+        project_slug: resolve_plain_setting(settings.tracker.project_slug, System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")),
         assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
     }
 
@@ -418,6 +419,15 @@ defmodule SymphonyElixir.Config.Schema do
   defp resolve_secret_setting(value, fallback) when is_binary(value) do
     case resolve_env_value(value, fallback) do
       resolved when is_binary(resolved) -> normalize_secret_value(resolved)
+      resolved -> resolved
+    end
+  end
+
+  defp resolve_plain_setting(nil, fallback), do: normalize_plain_value(fallback)
+
+  defp resolve_plain_setting(value, fallback) when is_binary(value) do
+    case resolve_env_value(value, fallback) do
+      resolved when is_binary(resolved) -> normalize_plain_value(resolved)
       resolved -> resolved
     end
   end
@@ -478,6 +488,12 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp normalize_secret_value(_value), do: nil
+
+  defp normalize_plain_value(value) when is_binary(value) do
+    if value == "", do: nil, else: value
+  end
+
+  defp normalize_plain_value(_value), do: nil
 
   defp default_turn_sandbox_policy(workspace) do
     %{

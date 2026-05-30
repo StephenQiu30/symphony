@@ -1,0 +1,9 @@
+# Local environment files. Keep .env.example tracked as documentation.
+.env
+.env.*
+!.env.example
+
+# Runtime workspace and logs produced by local Docker runs.
+.symphony-workspaces/
+log/
+logs/

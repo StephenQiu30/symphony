@@ -37,17 +37,18 @@ Linear issue can become a dispatch candidate again after restart.
    [Harness engineering](https://openai.com/index/harness-engineering/).
 2. Get a new personal token in Linear via Settings → Security & access → Personal API keys, and
    set it as the `LINEAR_API_KEY` environment variable.
-3. Copy this directory's `WORKFLOW.md` to your repo.
-4. Optionally copy the `commit`, `push`, `pull`, `land`, and `linear` skills to your repo.
+3. Copy `.env.example` to `.env` and set the project-specific values.
+4. Copy this directory's `WORKFLOW.md` to your repo.
+5. Optionally copy the `commit`, `push`, `pull`, `land`, and `linear` skills to your repo.
    - The `linear` skill expects Symphony's `linear_graphql` app-server tool for raw Linear GraphQL
      operations such as comment editing or upload flows.
-5. Customize the copied `WORKFLOW.md` file for your project.
+6. Customize the copied `WORKFLOW.md` file for your project.
    - To get your project's slug, right-click the project and copy its URL. The slug is part of the
      URL.
    - When creating a workflow based on this repo, note that it depends on non-standard Linear
      issue statuses: "Rework", "Human Review", and "Merging". You can customize them in
      Team Settings → Workflow in Linear.
-6. Follow the instructions below to install the required runtime dependencies and start the service.
+7. Follow the instructions below to install the required runtime dependencies and start the service.
 
 ## Prerequisites
 
@@ -67,15 +68,70 @@ mise trust
 mise install
 mise exec -- mix setup
 mise exec -- mix build
-mise exec -- ./bin/symphony ./WORKFLOW.md
+mise exec -- ./bin/symphony \
+  --i-understand-that-this-will-be-running-without-the-usual-guardrails \
+  ./WORKFLOW.md
 ```
+
+To start the optional Phoenix dashboard while running locally:
+
+```bash
+mise exec -- ./bin/symphony \
+  --i-understand-that-this-will-be-running-without-the-usual-guardrails \
+  --port 4000 \
+  ./WORKFLOW.md
+```
+
+Then open <http://localhost:4000>.
+
+## Run with Docker
+
+The repository also includes a root-level `Dockerfile` and `docker-compose.yml` for running the
+Elixir implementation in a container.
+
+From the repository root:
+
+```bash
+cp .env.example .env
+# Edit .env.
+docker compose up --build
+```
+
+Then open <http://localhost:4000>.
+
+Useful Docker environment variables:
+
+- `LINEAR_API_KEY` is required and is passed through to Symphony.
+- `SYMPHONY_LINEAR_PROJECT_SLUG` tells Symphony which Linear project to poll.
+- `SOURCE_REPO_URL` tells the default `hooks.after_create` which repository to clone.
+- `SYMPHONY_PORT` changes the host port, for example `SYMPHONY_PORT=4100 docker compose up`.
+- `SYMPHONY_HOST_WORKSPACE_ROOT` changes the host directory mounted to
+  `/root/code/symphony-workspaces`; by default compose uses `./.symphony-workspaces`.
+- `CODEX_VERSION` overrides the Codex CLI npm package version installed in the image.
+
+The compose setup mounts:
+
+- `./elixir/WORKFLOW.md` into the container, so edit that file before starting.
+- `~/.codex` into the container so Codex can reuse your existing auth.
+- `~/.ssh` into the container so `hooks.after_create` can clone private repositories over SSH.
+
+For the dashboard to be reachable from the host, the workflow needs:
+
+```yaml
+server:
+  host: "0.0.0.0"
+```
+
+The in-repo `WORKFLOW.md` already includes that setting.
 
 ## Configuration
 
 Pass a custom workflow file path to `./bin/symphony` when starting the service:
 
 ```bash
-./bin/symphony /path/to/custom/WORKFLOW.md
+./bin/symphony \
+  --i-understand-that-this-will-be-running-without-the-usual-guardrails \
+  /path/to/custom/WORKFLOW.md
 ```
 
 If no path is passed, Symphony defaults to `./WORKFLOW.md`.
@@ -88,18 +144,21 @@ Optional flags:
 The `WORKFLOW.md` file uses YAML front matter for configuration, plus a Markdown body used as the
 Codex session prompt.
 
+Symphony loads `.env` files from the current working directory and the directory containing
+`WORKFLOW.md`. Existing exported environment variables win over values in `.env`.
+
 Minimal example:
 
 ```md
 ---
 tracker:
   kind: linear
-  project_slug: "..."
+  project_slug: "$SYMPHONY_LINEAR_PROJECT_SLUG"
 workspace:
-  root: ~/code/workspaces
+  root: "$SYMPHONY_WORKSPACE_ROOT"
 hooks:
   after_create: |
-    git clone git@github.com:your-org/your-repo.git .
+    git clone "$SOURCE_REPO_URL" .
 agent:
   max_concurrent_agents: 10
   max_turns: 20
@@ -133,6 +192,8 @@ Notes:
 - If a hook needs `mise exec` inside a freshly cloned workspace, trust the repo config and fetch
   the project dependencies in `hooks.after_create` before invoking `mise` later from other hooks.
 - `tracker.api_key` reads from `LINEAR_API_KEY` when unset or when value is `$LINEAR_API_KEY`.
+- `tracker.project_slug` reads from `SYMPHONY_LINEAR_PROJECT_SLUG` when unset or when value is
+  `$SYMPHONY_LINEAR_PROJECT_SLUG`.
 - For path values, `~` is expanded to the home directory.
 - For env-backed path values, use `$VAR`. `workspace.root` resolves `$VAR` before path handling,
   while `codex.command` stays a shell command string and any `$VAR` expansion there happens in the
@@ -141,6 +202,7 @@ Notes:
 ```yaml
 tracker:
   api_key: $LINEAR_API_KEY
+  project_slug: $SYMPHONY_LINEAR_PROJECT_SLUG
 workspace:
   root: $SYMPHONY_WORKSPACE_ROOT
 hooks:

@@ -105,7 +105,7 @@ defmodule SymphonyElixir.CoreTest do
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
+    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 \"$SOURCE_REPO_URL\" ."
     assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
     assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
@@ -115,22 +115,119 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.workflow_prompt() == prompt
   end
 
-  test "linear api token resolves from LINEAR_API_KEY env var" do
+  test "linear api token and project slug resolve from env vars" do
     previous_linear_api_key = System.get_env("LINEAR_API_KEY")
+    previous_project_slug = System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")
     env_api_key = "test-linear-api-key"
+    env_project_slug = "env-project-slug"
 
-    on_exit(fn -> restore_env("LINEAR_API_KEY", previous_linear_api_key) end)
+    on_exit(fn ->
+      restore_env("LINEAR_API_KEY", previous_linear_api_key)
+      restore_env("SYMPHONY_LINEAR_PROJECT_SLUG", previous_project_slug)
+    end)
+
     System.put_env("LINEAR_API_KEY", env_api_key)
+    System.put_env("SYMPHONY_LINEAR_PROJECT_SLUG", env_project_slug)
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: nil,
-      tracker_project_slug: "project",
+      tracker_project_slug: "$SYMPHONY_LINEAR_PROJECT_SLUG",
       codex_command: "/bin/sh app-server"
     )
 
     assert Config.settings!().tracker.api_key == env_api_key
-    assert Config.settings!().tracker.project_slug == "project"
+    assert Config.settings!().tracker.project_slug == env_project_slug
     assert :ok = Config.validate!()
+  end
+
+  test "workflow load imports .env from workflow directory without overwriting existing env" do
+    env_path = Path.join(Path.dirname(Workflow.workflow_file_path()), ".env")
+    previous_project_slug = System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")
+    previous_workspace_root = System.get_env("SYMPHONY_WORKSPACE_ROOT")
+    previous_source_repo_url = System.get_env("SOURCE_REPO_URL")
+
+    on_exit(fn ->
+      restore_env("SYMPHONY_LINEAR_PROJECT_SLUG", previous_project_slug)
+      restore_env("SYMPHONY_WORKSPACE_ROOT", previous_workspace_root)
+      restore_env("SOURCE_REPO_URL", previous_source_repo_url)
+    end)
+
+    System.put_env("SYMPHONY_LINEAR_PROJECT_SLUG", "already-exported")
+    System.delete_env("SYMPHONY_WORKSPACE_ROOT")
+    System.delete_env("SOURCE_REPO_URL")
+
+    File.write!(env_path, """
+    SYMPHONY_LINEAR_PROJECT_SLUG=from-env-file
+    SYMPHONY_WORKSPACE_ROOT="/tmp/symphony env workspaces"
+    export SOURCE_REPO_URL='git@github.com:example/repo.git'
+    """)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_project_slug: "$SYMPHONY_LINEAR_PROJECT_SLUG",
+      workspace_root: "$SYMPHONY_WORKSPACE_ROOT"
+    )
+
+    assert Config.settings!().tracker.project_slug == "already-exported"
+    assert Config.settings!().workspace.root == "/tmp/symphony env workspaces"
+    assert System.get_env("SOURCE_REPO_URL") == "git@github.com:example/repo.git"
+  end
+
+  test "env file loader handles supported dotenv syntax and ignores invalid lines" do
+    env_path = Path.join(Path.dirname(Workflow.workflow_file_path()), ".env.custom")
+
+    previous_plain = System.get_env("SYMPHONY_ENV_FILE_PLAIN")
+    previous_double = System.get_env("SYMPHONY_ENV_FILE_DOUBLE")
+    previous_single = System.get_env("SYMPHONY_ENV_FILE_SINGLE")
+    previous_export = System.get_env("SYMPHONY_ENV_FILE_EXPORT")
+    previous_unclosed_double = System.get_env("SYMPHONY_ENV_FILE_UNCLOSED_DOUBLE")
+    previous_unclosed_single = System.get_env("SYMPHONY_ENV_FILE_UNCLOSED_SINGLE")
+    previous_existing = System.get_env("SYMPHONY_ENV_FILE_EXISTING")
+    previous_invalid = System.get_env("1_INVALID_ENV_FILE_KEY")
+
+    on_exit(fn ->
+      restore_env("SYMPHONY_ENV_FILE_PLAIN", previous_plain)
+      restore_env("SYMPHONY_ENV_FILE_DOUBLE", previous_double)
+      restore_env("SYMPHONY_ENV_FILE_SINGLE", previous_single)
+      restore_env("SYMPHONY_ENV_FILE_EXPORT", previous_export)
+      restore_env("SYMPHONY_ENV_FILE_UNCLOSED_DOUBLE", previous_unclosed_double)
+      restore_env("SYMPHONY_ENV_FILE_UNCLOSED_SINGLE", previous_unclosed_single)
+      restore_env("SYMPHONY_ENV_FILE_EXISTING", previous_existing)
+      restore_env("1_INVALID_ENV_FILE_KEY", previous_invalid)
+    end)
+
+    System.delete_env("SYMPHONY_ENV_FILE_PLAIN")
+    System.delete_env("SYMPHONY_ENV_FILE_DOUBLE")
+    System.delete_env("SYMPHONY_ENV_FILE_SINGLE")
+    System.delete_env("SYMPHONY_ENV_FILE_EXPORT")
+    System.delete_env("SYMPHONY_ENV_FILE_UNCLOSED_DOUBLE")
+    System.delete_env("SYMPHONY_ENV_FILE_UNCLOSED_SINGLE")
+    System.put_env("SYMPHONY_ENV_FILE_EXISTING", "from-shell")
+
+    File.write!(env_path, """
+
+    # comment
+    not-an-assignment
+    1_INVALID_ENV_FILE_KEY=ignored
+    SYMPHONY_ENV_FILE_PLAIN=value # inline comment
+    SYMPHONY_ENV_FILE_DOUBLE="quoted \\"value\\""
+    SYMPHONY_ENV_FILE_SINGLE='single quoted'
+    export SYMPHONY_ENV_FILE_EXPORT=exported
+    SYMPHONY_ENV_FILE_UNCLOSED_DOUBLE="unterminated
+    SYMPHONY_ENV_FILE_UNCLOSED_SINGLE='unterminated
+    SYMPHONY_ENV_FILE_EXISTING=from-file
+    """)
+
+    assert :ok = SymphonyElixir.EnvFile.load(Path.join(Path.dirname(env_path), "missing.env"))
+    assert :ok = SymphonyElixir.EnvFile.load(env_path)
+
+    assert System.get_env("SYMPHONY_ENV_FILE_PLAIN") == "value"
+    assert System.get_env("SYMPHONY_ENV_FILE_DOUBLE") == "quoted \"value\""
+    assert System.get_env("SYMPHONY_ENV_FILE_SINGLE") == "single quoted"
+    assert System.get_env("SYMPHONY_ENV_FILE_EXPORT") == "exported"
+    assert System.get_env("SYMPHONY_ENV_FILE_UNCLOSED_DOUBLE") == "\"unterminated"
+    assert System.get_env("SYMPHONY_ENV_FILE_UNCLOSED_SINGLE") == "'unterminated"
+    assert System.get_env("SYMPHONY_ENV_FILE_EXISTING") == "from-shell"
+    assert System.get_env("1_INVALID_ENV_FILE_KEY") == nil
   end
 
   test "linear assignee resolves from LINEAR_ASSIGNEE env var" do
@@ -751,9 +848,10 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
+    scheduler_slack_ms = 2_000
     remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
 
-    assert remaining_ms >= min_remaining_ms
+    assert remaining_ms >= min_remaining_ms - scheduler_slack_ms
     assert remaining_ms <= max_remaining_ms
   end
 

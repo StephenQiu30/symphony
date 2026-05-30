@@ -51,6 +51,8 @@ defmodule SymphonyElixir.Workflow do
 
   @spec load(Path.t()) :: {:ok, loaded_workflow()} | {:error, term()}
   def load(path) when is_binary(path) do
+    SymphonyElixir.EnvFile.load_for_workflow(path)
+
     case File.read(path) do
       {:ok, content} ->
         parse(content)

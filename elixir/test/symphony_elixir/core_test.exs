@@ -1713,7 +1713,7 @@ defmodule SymphonyElixir.CoreTest do
       cat >/dev/null
       printf '%s\\n' '{"type":"system","subtype":"status","status":"requesting"}'
       printf '%s\\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}}'
-      printf '%s\\n' '{"type":"result","subtype":"success","result":"done"}'
+      printf '%s\\n' '{"type":"result","subtype":"success","session_id":"claude-session-1","result":"done","usage":{"input_tokens":11,"output_tokens":3,"total_tokens":14}}'
       """)
 
       File.chmod!(claude_binary, 0o755)
@@ -1742,14 +1742,78 @@ defmodule SymphonyElixir.CoreTest do
         labels: []
       }
 
-      assert {:ok, %{result: :turn_completed}} =
+      assert {:ok, %{result: :turn_completed, session_id: "claude-session-1"}} =
                SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
 
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "system", "status" => "requesting"}}}
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "stream_event"}}}
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "result", "result" => "done"}}}
 
+      assert_receive {:agent_message,
+                      %{
+                        event: :turn_completed,
+                        session_id: "claude-session-1",
+                        payload: %{
+                          "usage" => %{"input_tokens" => 11, "output_tokens" => 3, "total_tokens" => 14}
+                        }
+                      }}
+
       assert [] = Path.wildcard(Path.join(workspace, ".symphony-claude-prompt.*"))
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent treats claude stream json result errors as failed turns" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-claude-stream-json-error-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace = Path.join(test_root, "workspace")
+      claude_binary = Path.join(test_root, "fake-claude")
+      File.mkdir_p!(workspace)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      cat >/dev/null
+      printf '%s\\n' '{"type":"result","subtype":"error","session_id":"claude-session-error","is_error":true,"result":"permission denied"}'
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+      claude:
+        command: "#{claude_binary} -p --dangerously-skip-permissions"
+      ---
+      Stream JSON prompt body.
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-claude-stream-json-error",
+        identifier: "STE-44",
+        title: "Parse Claude stream JSON error",
+        description: "Claude stream-json result errors should fail the turn",
+        state: "In Progress",
+        labels: []
+      }
+
+      assert {:error, {:cli_agent_failed, :claude, %{"result" => "permission denied"}}} =
+               SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+
+      assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "result", "result" => "permission denied"}}}
+      assert_receive {:agent_message, %{event: :turn_failed, session_id: "claude-session-error"}}
+      refute_receive {:agent_message, %{event: :turn_completed}}, 100
     after
       File.rm_rf(test_root)
     end
@@ -1774,7 +1838,7 @@ defmodule SymphonyElixir.CoreTest do
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
       printf '%s\\n' '{"type":"system","subtype":"status","status":"requesting"}'
       printf '%s\\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}}'
-      printf '%s\\n' '{"type":"result","subtype":"success","result":"done","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}'
+      printf '%s\\n' '{"type":"result","subtype":"success","session_id":"cursor-session-1","result":"done","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}'
       """)
 
       File.chmod!(cursor_binary, 0o755)
@@ -1806,12 +1870,22 @@ defmodule SymphonyElixir.CoreTest do
         labels: []
       }
 
-      assert {:ok, %{result: :turn_completed}} =
+      assert {:ok, %{result: :turn_completed, session_id: "cursor-session-1"}} =
                SymphonyElixir.AgentCli.run(:cursor, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
 
       assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "system", "status" => "requesting"}}}
       assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "stream_event"}}}
       assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "result", "result" => "done"}}}
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :turn_completed,
+                        cli_agent_runtime: "cursor",
+                        session_id: "cursor-session-1",
+                        payload: %{
+                          "usage" => %{"input_tokens" => 10, "output_tokens" => 2, "total_tokens" => 12}
+                        }
+                      }}
 
       trace = File.read!(trace_file)
       assert trace =~ "--output-format stream-json"

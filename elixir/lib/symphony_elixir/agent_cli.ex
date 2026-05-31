@@ -84,17 +84,25 @@ defmodule SymphonyElixir.AgentCli do
       "base64 -d > \"$prompt_file\" <<'__SYMPHONY_AGENT_PROMPT__'",
       encoded_prompt,
       "__SYMPHONY_AGENT_PROMPT__",
-      launch_command(settings)
+      launch_command(runtime, settings)
     ]
     |> Enum.join("\n")
   end
 
-  defp launch_command(%{command: command, prompt_mode: "argument"}) do
-    "exec #{command} \"$(cat \"$prompt_file\")\""
+  defp launch_command(runtime, %{command: command, prompt_mode: "argument"}) do
+    "exec #{headless_command(runtime, command)} \"$(cat \"$prompt_file\")\""
   end
 
-  defp launch_command(%{command: command}) do
-    "exec #{command} < \"$prompt_file\""
+  defp launch_command(runtime, %{command: command}) do
+    "exec #{headless_command(runtime, command)} < \"$prompt_file\""
+  end
+
+  defp headless_command(runtime, command) when runtime in [:claude, :cursor] and is_binary(command) do
+    if Regex.match?(~r/(^|\s)(-p|--print)(\s|$)/, command) do
+      command
+    else
+      command <> " -p"
+    end
   end
 
   defp await_completion(runtime, port, on_message, session_id, metadata) do

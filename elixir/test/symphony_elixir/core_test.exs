@@ -1481,6 +1481,71 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "cli agent launch forces claude command into print mode" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-claude-print-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      claude_binary = Path.join(test_root, "fake-claude")
+      trace_file = Path.join(test_root, "claude-print.trace")
+      File.mkdir_p!(workspace_root)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      printf 'ARGV:%s\\n' "$*" >> "${SYMP_TEST_CLAUDE_PRINT_TRACE}"
+      printf 'PROMPT:%s\\n' "$(cat)" >> "${SYMP_TEST_CLAUDE_PRINT_TRACE}"
+      printf 'completed\\n'
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      claude:
+        command: "#{claude_binary} --dangerously-skip-permissions"
+      ---
+      Print mode prompt for {{ issue.identifier }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_CLAUDE_PRINT_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CLAUDE_PRINT_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-claude-print",
+        identifier: "STE-44",
+        title: "Force print mode",
+        description: "Claude must run in non-interactive print mode",
+        state: "In Progress",
+        labels: []
+      }
+
+      state_fetcher = fn ["issue-claude-print"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+
+      trace = File.read!(trace_file)
+      assert trace =~ "ARGV:--dangerously-skip-permissions -p"
+      assert trace =~ "PROMPT:Print mode prompt for STE-44"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner surfaces ssh startup failures instead of silently hopping hosts" do
     test_root =
       Path.join(

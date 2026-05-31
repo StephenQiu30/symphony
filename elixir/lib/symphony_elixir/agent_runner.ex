@@ -4,8 +4,8 @@ defmodule SymphonyElixir.AgentRunner do
   """
 
   require Logger
+  alias SymphonyElixir.{AgentCli, Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
   @type worker_host :: String.t() | nil
 
@@ -35,7 +35,7 @@ defmodule SymphonyElixir.AgentRunner do
 
         try do
           with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host)
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
@@ -76,6 +76,16 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
+  defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+    case Config.agent_runtime() do
+      runtime when runtime in [:claude, :cursor] ->
+        run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
+
+      :codex ->
+        run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+    end
+  end
+
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
@@ -85,6 +95,66 @@ defmodule SymphonyElixir.AgentRunner do
         do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
         AppServer.stop_session(session)
+      end
+    end
+  end
+
+  defp run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host) do
+    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+
+    context = %{
+      codex_update_recipient: codex_update_recipient,
+      issue_state_fetcher: issue_state_fetcher,
+      max_turns: max_turns,
+      opts: opts,
+      runtime: runtime,
+      worker_host: worker_host,
+      workspace: workspace
+    }
+
+    do_run_cli_agent_turns(context, issue, 1)
+  end
+
+  defp do_run_cli_agent_turns(context, issue, turn_number) do
+    %{
+      codex_update_recipient: codex_update_recipient,
+      issue_state_fetcher: issue_state_fetcher,
+      max_turns: max_turns,
+      opts: opts,
+      runtime: runtime,
+      worker_host: worker_host,
+      workspace: workspace
+    } = context
+
+    prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+
+    with {:ok, turn_session} <-
+           AgentCli.run(
+             runtime,
+             workspace,
+             prompt,
+             issue,
+             worker_host: worker_host,
+             on_message: codex_message_handler(codex_update_recipient, issue)
+           ) do
+      Logger.info("Completed #{runtime} agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+
+      case continue_with_issue?(issue, issue_state_fetcher) do
+        {:continue, refreshed_issue} when turn_number < max_turns ->
+          Logger.info("Continuing #{runtime} agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
+
+          do_run_cli_agent_turns(context, refreshed_issue, turn_number + 1)
+
+        {:continue, refreshed_issue} ->
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
+          :ok
+
+        {:done, _refreshed_issue} ->
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -136,7 +206,7 @@ defmodule SymphonyElixir.AgentRunner do
     """
     Continuation guidance:
 
-    - The previous Codex turn completed normally, but the Linear issue is still in an active state.
+    - The previous agent turn completed normally, but the Linear issue is still in an active state.
     - This is continuation turn ##{turn_number} of #{max_turns} for the current agent run.
     - Resume from the current workspace and workpad state instead of restarting from scratch.
     - The original task instructions and prior turn context are already present in this thread, so do not restate them before acting.

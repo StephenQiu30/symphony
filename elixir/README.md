@@ -196,9 +196,11 @@ Notes:
   write `.git/`, fetch, push, and run hooks without Codex sandbox prompts. Set stricter sandbox
   fields explicitly in `WORKFLOW.md` for less trusted projects.
 - Claude Code and Cursor Agent are CLI runtimes. Symphony forces headless print mode and structured
-  streaming output when the configured command omits the required flags, parses `stream-json`
-  progress, extracts final `usage` from result payloads, and reports failures from error results,
-  non-zero exits, or timeouts through the same retry/blocking flow used by Codex.
+  streaming output when the configured command omits the required flags. It also forces
+  high-permission defaults for trusted unattended work: Claude gets `--dangerously-skip-permissions`
+  and Cursor gets `--force --sandbox disabled`. Symphony parses `stream-json` progress, extracts
+  final `usage` from result payloads, and reports failures from error results, non-zero exits, or
+  timeouts through the same retry/blocking flow used by Codex.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
   This continuation loop also applies to Claude and Cursor CLI runtimes.

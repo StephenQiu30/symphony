@@ -100,6 +100,7 @@ defmodule SymphonyElixir.AgentCli do
   defp headless_command(:claude, command) when is_binary(command) do
     command
     |> ensure_flag(~r/(^|\s)(-p|--print)(\s|$)/, "-p")
+    |> ensure_flag(~r/(^|\s)--dangerously-skip-permissions(\s|$)/, "--dangerously-skip-permissions")
     |> ensure_claude_streaming_output()
     |> ensure_flag(~r/(^|\s)--verbose(\s|$)/, "--verbose")
   end
@@ -107,6 +108,8 @@ defmodule SymphonyElixir.AgentCli do
   defp headless_command(:cursor, command) when is_binary(command) do
     command
     |> ensure_flag(~r/(^|\s)(-p|--print)(\s|$)/, "-p")
+    |> ensure_flag(~r/(^|\s)(-f|--force)(\s|$)/, "--force")
+    |> ensure_flag(~r/(^|\s)--sandbox(\s|=)/, "--sandbox disabled")
     |> ensure_cursor_streaming_output()
     |> ensure_flag(~r/(^|\s)--stream-partial-output(\s|$)/, "--stream-partial-output")
     |> ensure_flag(~r/(^|\s)--approve-mcps(\s|$)/, "--approve-mcps")

@@ -1487,6 +1487,69 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "cli agent launch forces cursor command into high-permission headless mode" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-cursor-permissions-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      cursor_binary = Path.join(test_root, "fake-cursor-agent")
+      trace_file = Path.join(test_root, "cursor-permissions.trace")
+      File.mkdir_p!(workspace_root)
+
+      File.write!(cursor_binary, """
+      #!/bin/sh
+      printf 'ARGV:%s\\n' "$*" >> "${SYMP_TEST_CURSOR_PERMISSIONS_TRACE}"
+      printf '%s\\n' '{"type":"result","subtype":"success","result":"completed"}'
+      """)
+
+      File.chmod!(cursor_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      cursor:
+        command: "#{cursor_binary}"
+      ---
+      Cursor permission prompt for {{ issue.identifier }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_CURSOR_PERMISSIONS_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CURSOR_PERMISSIONS_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-cursor-permissions",
+        identifier: "STE-45",
+        title: "Force Cursor permissions",
+        description: "Cursor must run with high-permission headless flags",
+        state: "In Progress",
+        labels: []
+      }
+
+      state_fetcher = fn ["issue-cursor-permissions"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+
+      assert File.read!(trace_file) =~
+               "ARGV:-p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps Cursor permission prompt for STE-45"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "cli agent launch does not source local bash profile" do
     test_root =
       Path.join(
@@ -1592,7 +1655,7 @@ defmodule SymphonyElixir.CoreTest do
       workspace:
         root: "#{workspace_root}"
       claude:
-        command: "#{claude_binary} --dangerously-skip-permissions"
+        command: "#{claude_binary}"
       ---
       Print mode prompt for {{ issue.identifier }}
       """
@@ -1621,7 +1684,7 @@ defmodule SymphonyElixir.CoreTest do
       trace = File.read!(trace_file)
 
       assert trace =~
-               "ARGV:--dangerously-skip-permissions -p --output-format stream-json --include-partial-messages --verbose"
+               "ARGV:-p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose"
 
       assert trace =~ "PROMPT:Print mode prompt for STE-44"
     after

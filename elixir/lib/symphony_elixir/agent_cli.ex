@@ -58,7 +58,7 @@ defmodule SymphonyElixir.AgentCli do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(shell_script(runtime, workspace, prompt))],
+            args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt))],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]

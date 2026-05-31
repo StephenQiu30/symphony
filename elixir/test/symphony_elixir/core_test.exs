@@ -1407,6 +1407,80 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "cli agent launch does not source local bash profile" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-profile-safe-#{System.unique_integer([:positive])}"
+      )
+
+    previous_home = System.get_env("HOME")
+
+    on_exit(fn -> restore_env("HOME", previous_home) end)
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      home_root = Path.join(test_root, "home")
+      claude_binary = Path.join(test_root, "fake-claude")
+      trace_file = Path.join(test_root, "profile-safe.trace")
+
+      File.mkdir_p!(workspace_root)
+      File.mkdir_p!(home_root)
+
+      File.write!(Path.join(home_root, ".bash_profile"), """
+      echo PROFILE_SOURCED >&2
+      exit 77
+      """)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      printf 'PROMPT:%s\\n' "$(cat)" >> "${SYMP_TEST_PROFILE_SAFE_TRACE}"
+      printf 'completed\\n'
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      claude:
+        command: "#{claude_binary} -p --dangerously-skip-permissions"
+      ---
+      Profile safe prompt for {{ issue.identifier }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("HOME", home_root)
+      System.put_env("SYMP_TEST_PROFILE_SAFE_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_PROFILE_SAFE_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-profile-safe",
+        identifier: "STE-44",
+        title: "Avoid bash profile",
+        description: "The local shell profile must not affect agent launch",
+        state: "In Progress",
+        labels: []
+      }
+
+      state_fetcher = fn ["issue-profile-safe"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+      assert File.read!(trace_file) =~ "PROMPT:Profile safe prompt for STE-44"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner surfaces ssh startup failures instead of silently hopping hosts" do
     test_root =
       Path.join(

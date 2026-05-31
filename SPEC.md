@@ -469,8 +469,8 @@ Fields:
 - `command` (string shell command)
   - Default: `claude -p --dangerously-skip-permissions`
   - The runtime launches this command via `bash -lc` in the workspace directory.
-  - Implementations SHOULD force headless print mode and structured streaming output when the
-    configured command omits those flags.
+  - Implementations SHOULD force headless print mode, high-permission operation, and structured
+    streaming output when the configured command omits those flags.
 - `prompt_mode` (`stdin` | `argument`)
   - Default: `stdin`.
   - Controls whether Symphony sends the rendered prompt over standard input or as a shell argument.
@@ -486,8 +486,8 @@ Fields:
 - `command` (string shell command)
   - Default: `cursor-agent -p --force --sandbox disabled`
   - The runtime launches this command via `bash -lc` in the workspace directory.
-  - Implementations SHOULD force headless print mode and structured streaming output when the
-    configured command omits those flags.
+  - Implementations SHOULD force headless print mode, high-permission operation, and structured
+    streaming output when the configured command omits those flags.
 - `prompt_mode` (`stdin` | `argument`)
   - Default: `argument`.
   - Controls whether Symphony sends the rendered prompt over standard input or as a shell argument.
@@ -1065,7 +1065,8 @@ Launch requirements:
 
 - Start the configured CLI command in the per-issue workspace.
 - Use `bash -lc <command>` and the configured `prompt_mode`.
-- Force non-interactive print/headless mode when omitted by the configured command.
+- Force non-interactive print/headless mode and high-permission execution when omitted by the
+  configured command.
 - Prefer structured streaming output (`stream-json`) so Symphony can display progress and extract
   final usage metadata.
 

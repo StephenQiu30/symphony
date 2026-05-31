@@ -160,10 +160,19 @@ hooks:
   after_create: |
     git clone "$SOURCE_REPO_URL" .
 agent:
+  default_runtime: codex
   max_concurrent_agents: 10
   max_turns: 20
+  runtime_by_label:
+    agent:codex: codex
+    agent:claude: claude
+    agent:cursor: cursor
 codex:
   command: codex app-server
+claude:
+  command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
+cursor:
+  command: cursor-agent -p --force --sandbox disabled
 ---
 
 You are working on a Linear issue {{ issue.identifier }}.
@@ -185,6 +194,11 @@ Notes:
   Symphony validation.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `agent.default_runtime` can be `codex`, `claude`, or `cursor`. If omitted, Symphony preserves the
+  legacy inference rule: a workflow with `cursor:` defaults to Cursor, a workflow with `claude:`
+  defaults to Claude, otherwise Codex.
+- `agent.runtime_by_label` maps normalized Linear labels to runtimes. For example, a ticket labeled
+  `agent:claude` will run with Claude even when the workflow default is Codex.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run

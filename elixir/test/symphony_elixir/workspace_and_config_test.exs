@@ -1032,6 +1032,100 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert :ok = Config.validate!()
   end
 
+  test "schema selects agent runtime from issue labels" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    agent:
+      default_runtime: codex
+      runtime_by_label:
+        agent:claude: claude
+        agent:cursor: cursor
+        agent:codex: codex
+    ---
+    Label-selected prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    config = Config.settings!()
+    assert config.agent.default_runtime == "codex"
+
+    assert config.agent.runtime_by_label == %{
+             "agent:claude" => "claude",
+             "agent:cursor" => "cursor",
+             "agent:codex" => "codex"
+           }
+
+    assert Config.agent_runtime() == :codex
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["Agent:Claude"]}) == :claude
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: [" agent:cursor "]}) == :cursor
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:codex", "agent:claude"]}) == :codex
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["area:server"]}) == :codex
+    assert :ok = Config.validate!()
+  end
+
+  test "schema rejects invalid label-selected runtimes" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    agent:
+      runtime_by_label:
+        agent:bad: llama
+    ---
+    Invalid label runtime prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "agent.runtime_by_label"
+    assert message =~ "runtime values must be one of codex, claude, cursor"
+  end
+
+  test "schema rejects blank label-selected runtime keys" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    agent:
+      runtime_by_label:
+        " ": claude
+    ---
+    Blank label runtime prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "agent.runtime_by_label"
+    assert message =~ "labels must not be blank"
+  end
+
+  test "schema rejects invalid default agent runtime" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    agent:
+      default_runtime: llama
+    ---
+    Invalid default runtime prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    assert {:error, {:invalid_workflow_config, message}} = Config.validate!()
+    assert message =~ "agent.default_runtime"
+    assert message =~ "is invalid"
+  end
+
   test "schema helpers cover custom type and state limit validation" do
     assert StringOrMap.type() == :map
     assert StringOrMap.embed_as(:json) == :self
@@ -1049,6 +1143,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert :error = StringOrMap.dump(123)
 
     assert Schema.normalize_state_limits(nil) == %{}
+    assert Schema.normalize_runtime_by_label(nil) == %{}
+    assert Schema.normalize_label(:AgentCursor) == "agentcursor"
+
+    assert Schema.normalize_runtime_by_label(%{" Agent:Claude " => :claude}) == %{
+             "agent:claude" => "claude"
+           }
 
     assert Schema.normalize_state_limits(%{"In Progress" => 2, todo: 1}) == %{
              "todo" => 1,

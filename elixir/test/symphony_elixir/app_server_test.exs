@@ -327,7 +327,7 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
-  test "app server fails when command execution approval is required under safer defaults" do
+  test "app server fails when command execution approval is required by policy" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -368,7 +368,8 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{codex_binary} app-server",
+        codex_approval_policy: "on-request"
       )
 
       issue = %Issue{

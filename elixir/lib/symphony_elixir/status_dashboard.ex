@@ -1073,22 +1073,27 @@ defmodule SymphonyElixir.StatusDashboard do
 
   def humanize_codex_message(%{event: event, message: message}) do
     payload = unwrap_codex_message_payload(message)
+    runtime = cli_agent_runtime(message)
 
-    (humanize_codex_event(event, message, payload) || humanize_codex_payload(payload))
+    (humanize_codex_event(event, message, payload) || humanize_codex_payload(payload, runtime))
     |> truncate(140)
   end
 
   def humanize_codex_message(%{message: message}) do
+    runtime = cli_agent_runtime(message)
+
     message
     |> unwrap_codex_message_payload()
-    |> humanize_codex_payload()
+    |> humanize_codex_payload(runtime)
     |> truncate(140)
   end
 
   def humanize_codex_message(message) do
+    runtime = cli_agent_runtime(message)
+
     message
     |> unwrap_codex_message_payload()
-    |> humanize_codex_payload()
+    |> humanize_codex_payload(runtime)
     |> truncate(140)
   end
 
@@ -1163,7 +1168,13 @@ defmodule SymphonyElixir.StatusDashboard do
 
   defp unwrap_codex_message_payload(message), do: message
 
-  defp humanize_codex_payload(%{} = payload) do
+  defp cli_agent_runtime(%{} = message) do
+    map_value(message, ["cli_agent_runtime", :cli_agent_runtime])
+  end
+
+  defp cli_agent_runtime(_message), do: nil
+
+  defp humanize_codex_payload(%{} = payload, runtime) do
     case map_value(payload, ["method", :method]) do
       method when is_binary(method) ->
         humanize_codex_method(method, payload)
@@ -1171,7 +1182,7 @@ defmodule SymphonyElixir.StatusDashboard do
       _ ->
         cond do
           is_binary(map_value(payload, ["type", :type])) ->
-            humanize_claude_payload(payload)
+            humanize_cli_payload(runtime, payload)
 
           is_binary(map_value(payload, ["session_id", :session_id])) ->
             "session started (#{map_value(payload, ["session_id", :session_id])})"
@@ -1189,14 +1200,14 @@ defmodule SymphonyElixir.StatusDashboard do
     end
   end
 
-  defp humanize_codex_payload(payload) when is_binary(payload) do
+  defp humanize_codex_payload(payload, _runtime) when is_binary(payload) do
     payload
     |> String.replace("\n", " ")
     |> sanitize_ansi_and_control_bytes()
     |> String.trim()
   end
 
-  defp humanize_codex_payload(payload) do
+  defp humanize_codex_payload(payload, _runtime) do
     payload
     |> inspect(pretty: true, limit: 20)
     |> String.replace("\n", " ")
@@ -1204,78 +1215,82 @@ defmodule SymphonyElixir.StatusDashboard do
     |> String.trim()
   end
 
-  defp humanize_claude_payload(payload) do
+  defp humanize_cli_payload("cursor", payload), do: humanize_anthropic_style_cli_payload("cursor", payload)
+  defp humanize_cli_payload("claude", payload), do: humanize_anthropic_style_cli_payload("claude", payload)
+  defp humanize_cli_payload(_runtime, payload), do: humanize_anthropic_style_cli_payload("claude", payload)
+
+  defp humanize_anthropic_style_cli_payload(runtime, payload) do
     type = map_value(payload, ["type", :type])
     subtype = map_value(payload, ["subtype", :subtype])
 
     case {type, subtype} do
       {"system", subtype} ->
-        humanize_claude_system_payload(subtype, payload)
+        humanize_cli_system_payload(runtime, subtype, payload)
 
       {"stream_event", _subtype} ->
-        humanize_claude_stream_event(payload)
+        humanize_cli_stream_event(runtime, payload)
 
       {"assistant", _subtype} ->
-        humanize_claude_assistant_message(payload)
+        humanize_cli_assistant_message(runtime, payload)
 
       {"result", "success"} ->
         result = map_value(payload, ["result", :result])
-        if is_binary(result), do: "claude completed: #{inline_text(result)}", else: "claude completed"
+        if is_binary(result), do: "#{runtime} completed: #{inline_text(result)}", else: "#{runtime} completed"
 
       {"result", _subtype} ->
-        "claude result: #{subtype || "unknown"}"
+        "#{runtime} result: #{subtype || "unknown"}"
 
       _ ->
         inspect_payload(payload)
     end
   end
 
-  defp humanize_claude_system_payload("status", payload) do
+  defp humanize_cli_system_payload(runtime, "status", payload) do
     status = map_value(payload, ["status", :status]) || "unknown"
-    "claude status: #{inline_text(to_string(status))}"
+    "#{runtime} status: #{inline_text(to_string(status))}"
   end
 
-  defp humanize_claude_system_payload("init", payload) do
+  defp humanize_cli_system_payload(runtime, "init", payload) do
     model = map_value(payload, ["model", :model])
-    if is_binary(model), do: "claude initialized (#{model})", else: "claude initialized"
+    if is_binary(model), do: "#{runtime} initialized (#{model})", else: "#{runtime} initialized"
   end
 
-  defp humanize_claude_system_payload("hook_started", payload) do
+  defp humanize_cli_system_payload(runtime, "hook_started", payload) do
     payload
     |> claude_hook_name()
     |> case do
-      hook when is_binary(hook) -> "claude hook started: #{inline_text(hook)}"
-      _other -> "claude hook started"
+      hook when is_binary(hook) -> "#{runtime} hook started: #{inline_text(hook)}"
+      _other -> "#{runtime} hook started"
     end
   end
 
-  defp humanize_claude_system_payload("hook_response", payload) do
+  defp humanize_cli_system_payload(runtime, "hook_response", payload) do
     payload
     |> claude_hook_name()
     |> case do
-      hook when is_binary(hook) -> "claude hook completed: #{inline_text(hook)}"
-      _other -> "claude hook completed"
+      hook when is_binary(hook) -> "#{runtime} hook completed: #{inline_text(hook)}"
+      _other -> "#{runtime} hook completed"
     end
   end
 
-  defp humanize_claude_system_payload(_subtype, payload), do: inspect_payload(payload)
+  defp humanize_cli_system_payload(_runtime, _subtype, payload), do: inspect_payload(payload)
 
   defp claude_hook_name(payload) do
     map_value(payload, ["hook_name", :hook_name]) || map_value(payload, ["hook_event", :hook_event])
   end
 
-  defp humanize_claude_stream_event(payload) do
+  defp humanize_cli_stream_event(runtime, payload) do
     event_type = map_path(payload, ["event", "type"]) || map_path(payload, [:event, :type])
     delta_type = map_path(payload, ["event", "delta", "type"]) || map_path(payload, [:event, :delta, :type])
     text_delta = claude_stream_delta(payload, "text")
     thinking_delta = claude_stream_delta(payload, "thinking")
 
     cond do
-      is_binary(text_delta) -> "claude text streaming: #{inline_text(text_delta)}"
-      is_binary(thinking_delta) -> "claude thinking streaming: #{inline_text(thinking_delta)}"
-      is_binary(delta_type) -> "claude stream: #{inline_text(delta_type)}"
-      is_binary(event_type) -> "claude stream: #{inline_text(event_type)}"
-      true -> "claude stream event"
+      is_binary(text_delta) -> "#{runtime} text streaming: #{inline_text(text_delta)}"
+      is_binary(thinking_delta) -> "#{runtime} thinking streaming: #{inline_text(thinking_delta)}"
+      is_binary(delta_type) -> "#{runtime} stream: #{inline_text(delta_type)}"
+      is_binary(event_type) -> "#{runtime} stream: #{inline_text(event_type)}"
+      true -> "#{runtime} stream event"
     end
   end
 
@@ -1291,16 +1306,16 @@ defmodule SymphonyElixir.StatusDashboard do
     |> String.trim()
   end
 
-  defp humanize_claude_assistant_message(payload) do
+  defp humanize_cli_assistant_message(runtime, payload) do
     text =
       payload
       |> map_path(["message", "content"])
       |> extract_claude_content_text()
 
     if is_binary(text) and text != "" do
-      "claude message: #{inline_text(text)}"
+      "#{runtime} message: #{inline_text(text)}"
     else
-      "claude assistant message"
+      "#{runtime} assistant message"
     end
   end
 

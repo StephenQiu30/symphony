@@ -1328,7 +1328,10 @@ defmodule SymphonyElixir.CoreTest do
       trace = File.read!(trace_file)
       assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-44"))
       assert trace =~ "PWD:#{canonical_workspace}"
-      assert trace =~ "ARGV:-p --dangerously-skip-permissions"
+
+      assert trace =~
+               "ARGV:-p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose"
+
       assert trace =~ "PROMPT:Claude prompt for STE-44: Run Claude workflow"
     after
       File.rm_rf(test_root)
@@ -1539,8 +1542,78 @@ defmodule SymphonyElixir.CoreTest do
       assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
 
       trace = File.read!(trace_file)
-      assert trace =~ "ARGV:--dangerously-skip-permissions -p"
+
+      assert trace =~
+               "ARGV:--dangerously-skip-permissions -p --output-format stream-json --include-partial-messages --verbose"
+
       assert trace =~ "PROMPT:Print mode prompt for STE-44"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent launch preserves explicit claude output format" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-claude-output-format-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      claude_binary = Path.join(test_root, "fake-claude")
+      trace_file = Path.join(test_root, "claude-output-format.trace")
+      File.mkdir_p!(workspace_root)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      printf 'ARGV:%s\\n' "$*" >> "${SYMP_TEST_CLAUDE_OUTPUT_FORMAT_TRACE}"
+      printf 'PROMPT:%s\\n' "$(cat)" >> "${SYMP_TEST_CLAUDE_OUTPUT_FORMAT_TRACE}"
+      printf 'completed\\n'
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      claude:
+        command: "#{claude_binary} -p --dangerously-skip-permissions --output-format json"
+      ---
+      Explicit output format prompt for {{ issue.identifier }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_CLAUDE_OUTPUT_FORMAT_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CLAUDE_OUTPUT_FORMAT_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-claude-output-format",
+        identifier: "STE-44",
+        title: "Preserve output format",
+        description: "Claude output format should not be duplicated",
+        state: "In Progress",
+        labels: []
+      }
+
+      state_fetcher = fn ["issue-claude-output-format"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+
+      trace = File.read!(trace_file)
+      assert trace =~ "ARGV:-p --dangerously-skip-permissions --output-format json --verbose"
+      refute trace =~ "--include-partial-messages"
+      refute trace =~ "--output-format json --output-format stream-json"
+      assert trace =~ "PROMPT:Explicit output format prompt for STE-44"
     after
       File.rm_rf(test_root)
     end

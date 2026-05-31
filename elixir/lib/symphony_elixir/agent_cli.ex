@@ -97,11 +97,35 @@ defmodule SymphonyElixir.AgentCli do
     "exec #{headless_command(runtime, command)} < \"$prompt_file\""
   end
 
-  defp headless_command(runtime, command) when runtime in [:claude, :cursor] and is_binary(command) do
-    if Regex.match?(~r/(^|\s)(-p|--print)(\s|$)/, command) do
+  defp headless_command(:claude, command) when is_binary(command) do
+    command
+    |> ensure_flag(~r/(^|\s)(-p|--print)(\s|$)/, "-p")
+    |> ensure_claude_streaming_output()
+    |> ensure_flag(~r/(^|\s)--verbose(\s|$)/, "--verbose")
+  end
+
+  defp headless_command(:cursor, command) when is_binary(command) do
+    ensure_flag(command, ~r/(^|\s)(-p|--print)(\s|$)/, "-p")
+  end
+
+  defp ensure_flag(command, pattern, flag) when is_binary(command) and is_binary(flag) do
+    if Regex.match?(pattern, command) do
       command
     else
-      command <> " -p"
+      command <> " " <> flag
+    end
+  end
+
+  defp ensure_claude_streaming_output(command) when is_binary(command) do
+    cond do
+      Regex.match?(~r/(^|\s)--output-format[=\s]stream-json(\s|$)/, command) ->
+        ensure_flag(command, ~r/(^|\s)--include-partial-messages(\s|$)/, "--include-partial-messages")
+
+      Regex.match?(~r/(^|\s)--output-format(\s|=)/, command) ->
+        command
+
+      true ->
+        command <> " --output-format stream-json --include-partial-messages"
     end
   end
 

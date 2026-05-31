@@ -451,9 +451,9 @@ fields locally if they want stricter startup checks.
 - `approval_policy` (Codex `AskForApproval` value)
   - Default: implementation-defined.
 - `thread_sandbox` (Codex `SandboxMode` value)
-  - Default: implementation-defined.
+  - Default: `danger-full-access`.
 - `turn_sandbox_policy` (Codex `SandboxPolicy` value)
-  - Default: implementation-defined.
+  - Default: `{"type":"dangerFullAccess"}`.
 - `turn_timeout_ms` (integer)
   - Default: `3600000` (1 hour)
 - `read_timeout_ms` (integer)
@@ -633,8 +633,8 @@ not require recognizing or validating extension fields unless that extension is 
 - `agent.runtime_by_label`: map of Linear label names to runtime names, default `{}`
 - `codex.command`: shell command string, default `codex app-server`
 - `codex.approval_policy`: Codex `AskForApproval` value, default implementation-defined
-- `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined
-- `codex.turn_sandbox_policy`: Codex `SandboxPolicy` value, default implementation-defined
+- `codex.thread_sandbox`: Codex `SandboxMode` value, default `danger-full-access`
+- `codex.turn_sandbox_policy`: Codex `SandboxPolicy` value, default `{"type":"dangerFullAccess"}`
 - `codex.turn_timeout_ms`: integer, default `3600000`
 - `codex.read_timeout_ms`: integer, default `30000`
 - `codex.stall_timeout_ms`: integer, default `300000`

@@ -748,19 +748,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert config.codex.approval_policy == "never"
 
-    assert config.codex.thread_sandbox == "workspace-write"
+    assert config.codex.thread_sandbox == "danger-full-access"
 
-    assert {:ok, canonical_default_workspace_root} =
-             SymphonyElixir.PathSafety.canonicalize(Path.join(System.tmp_dir!(), "symphony_workspaces"))
-
-    assert Config.codex_turn_sandbox_policy() == %{
-             "type" => "workspaceWrite",
-             "writableRoots" => [canonical_default_workspace_root],
-             "readOnlyAccess" => %{"type" => "fullAccess"},
-             "networkAccess" => false,
-             "excludeTmpdirEnvVar" => false,
-             "excludeSlashTmp" => false
-           }
+    assert Config.codex_turn_sandbox_policy() == %{"type" => "dangerFullAccess"}
 
     assert config.codex.turn_timeout_ms == 3_600_000
     assert config.codex.read_timeout_ms == 30_000
@@ -1217,14 +1207,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Schema.resolve_turn_sandbox_policy(%Schema{
              codex: %Codex{turn_sandbox_policy: nil},
              workspace: %Schema.Workspace{root: ""}
-           }) == %{
-             "type" => "workspaceWrite",
-             "writableRoots" => [Path.expand(Path.join(System.tmp_dir!(), "symphony_workspaces"))],
-             "readOnlyAccess" => %{"type" => "fullAccess"},
-             "networkAccess" => false,
-             "excludeTmpdirEnvVar" => false,
-             "excludeSlashTmp" => false
-           }
+           }) == %{"type" => "dangerFullAccess"}
 
     assert Schema.resolve_turn_sandbox_policy(
              %Schema{
@@ -1232,14 +1215,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
                workspace: %Schema.Workspace{root: "/tmp/ignored"}
              },
              "/tmp/workspace"
-           ) == %{
-             "type" => "workspaceWrite",
-             "writableRoots" => [Path.expand("/tmp/workspace")],
-             "readOnlyAccess" => %{"type" => "fullAccess"},
-             "networkAccess" => false,
-             "excludeTmpdirEnvVar" => false,
-             "excludeSlashTmp" => false
-           }
+           ) == %{"type" => "dangerFullAccess"}
   end
 
   test "schema keeps workspace roots raw while sandbox helpers expand only for local use" do
@@ -1251,26 +1227,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert settings.workspace.root == "~/.symphony-workspaces"
 
-    assert Schema.resolve_turn_sandbox_policy(settings) == %{
-             "type" => "workspaceWrite",
-             "writableRoots" => [Path.expand("~/.symphony-workspaces")],
-             "readOnlyAccess" => %{"type" => "fullAccess"},
-             "networkAccess" => false,
-             "excludeTmpdirEnvVar" => false,
-             "excludeSlashTmp" => false
-           }
+    assert Schema.resolve_turn_sandbox_policy(settings) == %{"type" => "dangerFullAccess"}
 
     assert {:ok, remote_policy} =
              Schema.resolve_runtime_turn_sandbox_policy(settings, nil, remote: true)
 
-    assert remote_policy == %{
-             "type" => "workspaceWrite",
-             "writableRoots" => ["~/.symphony-workspaces"],
-             "readOnlyAccess" => %{"type" => "fullAccess"},
-             "networkAccess" => false,
-             "excludeTmpdirEnvVar" => false,
-             "excludeSlashTmp" => false
-           }
+    assert remote_policy == %{"type" => "dangerFullAccess"}
   end
 
   test "runtime sandbox policy resolution passes explicit policies through unchanged" do
@@ -1347,12 +1309,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       settings = Config.settings!()
 
-      assert {:ok, canonical_workspace_root} =
-               SymphonyElixir.PathSafety.canonicalize(workspace_root)
-
       assert {:ok, default_policy} = Schema.resolve_runtime_turn_sandbox_policy(settings)
-      assert default_policy["type"] == "workspaceWrite"
-      assert default_policy["writableRoots"] == [canonical_workspace_root]
+      assert default_policy == %{"type" => "dangerFullAccess"}
 
       assert {:ok, blank_workspace_policy} =
                Schema.resolve_runtime_turn_sandbox_policy(settings, "")
@@ -1375,7 +1333,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, %{"type" => "futureSandbox", "nested" => %{"flag" => true}}} =
                Schema.resolve_runtime_turn_sandbox_policy(future_settings, 123)
 
-      assert {:error, {:unsafe_turn_sandbox_policy, {:invalid_workspace_root, 123}}} =
+      assert {:ok, %{"type" => "dangerFullAccess"}} =
                Schema.resolve_runtime_turn_sandbox_policy(settings, 123)
     after
       File.rm_rf(test_root)

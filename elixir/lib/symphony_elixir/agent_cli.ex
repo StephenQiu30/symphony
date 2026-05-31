@@ -90,11 +90,11 @@ defmodule SymphonyElixir.AgentCli do
   end
 
   defp launch_command(runtime, %{command: command, prompt_mode: "argument"}) do
-    "exec #{headless_command(runtime, command)} \"$(cat \"$prompt_file\")\""
+    "#{headless_command(runtime, command)} \"$(cat \"$prompt_file\")\""
   end
 
   defp launch_command(runtime, %{command: command}) do
-    "exec #{headless_command(runtime, command)} < \"$prompt_file\""
+    "#{headless_command(runtime, command)} < \"$prompt_file\""
   end
 
   defp headless_command(:claude, command) when is_binary(command) do
@@ -145,7 +145,7 @@ defmodule SymphonyElixir.AgentCli do
     receive do
       {^port, {:data, {:eol, chunk}}} ->
         line = pending_line <> to_string(chunk)
-        emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)
+        emit_cli_line(runtime, on_message, line, metadata)
         receive_loop(runtime, port, on_message, session_id, metadata, timeout_ms, "")
 
       {^port, {:data, {:noeol, chunk}}} ->
@@ -174,6 +174,17 @@ defmodule SymphonyElixir.AgentCli do
       |> Map.merge(payload)
 
     on_message.(message)
+  end
+
+  defp emit_cli_line(:claude, on_message, line, metadata) do
+    case Jason.decode(line) do
+      {:ok, payload} -> emit_message(on_message, :notification, %{payload: payload, raw: line}, metadata)
+      {:error, _reason} -> emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)
+    end
+  end
+
+  defp emit_cli_line(_runtime, on_message, line, metadata) do
+    emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)
   end
 
   defp stop_port(port) when is_port(port) do

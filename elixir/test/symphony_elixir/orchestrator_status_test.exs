@@ -1627,6 +1627,35 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert StatusDashboard.humanize_codex_message(wrapped) =~ "in 10"
   end
 
+  test "status dashboard humanizes claude stream-json events" do
+    requesting = %{
+      event: :notification,
+      message: %{payload: %{"type" => "system", "subtype" => "status", "status" => "requesting"}}
+    }
+
+    text_delta = %{
+      event: :notification,
+      message: %{
+        payload: %{
+          "type" => "stream_event",
+          "event" => %{
+            "type" => "content_block_delta",
+            "delta" => %{"type" => "text_delta", "text" => "updating workpad"}
+          }
+        }
+      }
+    }
+
+    result = %{
+      event: :notification,
+      message: %{payload: %{"type" => "result", "subtype" => "success", "result" => "completed"}}
+    }
+
+    assert StatusDashboard.humanize_codex_message(requesting) == "claude status: requesting"
+    assert StatusDashboard.humanize_codex_message(text_delta) == "claude text streaming: updating workpad"
+    assert StatusDashboard.humanize_codex_message(result) == "claude completed: completed"
+  end
+
   test "status dashboard uses shell command line as exec command status text" do
     message = %{
       event: :notification,

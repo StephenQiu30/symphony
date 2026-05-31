@@ -1170,6 +1170,9 @@ defmodule SymphonyElixir.StatusDashboard do
 
       _ ->
         cond do
+          is_binary(map_value(payload, ["type", :type])) ->
+            humanize_claude_payload(payload)
+
           is_binary(map_value(payload, ["session_id", :session_id])) ->
             "session started (#{map_value(payload, ["session_id", :session_id])})"
 
@@ -1200,6 +1203,117 @@ defmodule SymphonyElixir.StatusDashboard do
     |> sanitize_ansi_and_control_bytes()
     |> String.trim()
   end
+
+  defp humanize_claude_payload(payload) do
+    type = map_value(payload, ["type", :type])
+    subtype = map_value(payload, ["subtype", :subtype])
+
+    case {type, subtype} do
+      {"system", subtype} ->
+        humanize_claude_system_payload(subtype, payload)
+
+      {"stream_event", _subtype} ->
+        humanize_claude_stream_event(payload)
+
+      {"assistant", _subtype} ->
+        humanize_claude_assistant_message(payload)
+
+      {"result", "success"} ->
+        result = map_value(payload, ["result", :result])
+        if is_binary(result), do: "claude completed: #{inline_text(result)}", else: "claude completed"
+
+      {"result", _subtype} ->
+        "claude result: #{subtype || "unknown"}"
+
+      _ ->
+        inspect_payload(payload)
+    end
+  end
+
+  defp humanize_claude_system_payload("status", payload) do
+    status = map_value(payload, ["status", :status]) || "unknown"
+    "claude status: #{inline_text(to_string(status))}"
+  end
+
+  defp humanize_claude_system_payload("init", payload) do
+    model = map_value(payload, ["model", :model])
+    if is_binary(model), do: "claude initialized (#{model})", else: "claude initialized"
+  end
+
+  defp humanize_claude_system_payload("hook_started", payload) do
+    payload
+    |> claude_hook_name()
+    |> case do
+      hook when is_binary(hook) -> "claude hook started: #{inline_text(hook)}"
+      _other -> "claude hook started"
+    end
+  end
+
+  defp humanize_claude_system_payload("hook_response", payload) do
+    payload
+    |> claude_hook_name()
+    |> case do
+      hook when is_binary(hook) -> "claude hook completed: #{inline_text(hook)}"
+      _other -> "claude hook completed"
+    end
+  end
+
+  defp humanize_claude_system_payload(_subtype, payload), do: inspect_payload(payload)
+
+  defp claude_hook_name(payload) do
+    map_value(payload, ["hook_name", :hook_name]) || map_value(payload, ["hook_event", :hook_event])
+  end
+
+  defp humanize_claude_stream_event(payload) do
+    event_type = map_path(payload, ["event", "type"]) || map_path(payload, [:event, :type])
+    delta_type = map_path(payload, ["event", "delta", "type"]) || map_path(payload, [:event, :delta, :type])
+    text_delta = claude_stream_delta(payload, "text")
+    thinking_delta = claude_stream_delta(payload, "thinking")
+
+    cond do
+      is_binary(text_delta) -> "claude text streaming: #{inline_text(text_delta)}"
+      is_binary(thinking_delta) -> "claude thinking streaming: #{inline_text(thinking_delta)}"
+      is_binary(delta_type) -> "claude stream: #{inline_text(delta_type)}"
+      is_binary(event_type) -> "claude stream: #{inline_text(event_type)}"
+      true -> "claude stream event"
+    end
+  end
+
+  defp claude_stream_delta(payload, key) do
+    map_path(payload, ["event", "delta", key]) || map_path(payload, [:event, :delta, String.to_atom(key)])
+  end
+
+  defp inspect_payload(payload) do
+    payload
+    |> inspect(pretty: true, limit: 30)
+    |> String.replace("\n", " ")
+    |> sanitize_ansi_and_control_bytes()
+    |> String.trim()
+  end
+
+  defp humanize_claude_assistant_message(payload) do
+    text =
+      payload
+      |> map_path(["message", "content"])
+      |> extract_claude_content_text()
+
+    if is_binary(text) and text != "" do
+      "claude message: #{inline_text(text)}"
+    else
+      "claude assistant message"
+    end
+  end
+
+  defp extract_claude_content_text(content) when is_list(content) do
+    content
+    |> Enum.find_value(fn
+      %{"type" => "text", "text" => text} when is_binary(text) -> text
+      %{type: "text", text: text} when is_binary(text) -> text
+      _other -> nil
+    end)
+  end
+
+  defp extract_claude_content_text(_content), do: nil
 
   defp sanitize_ansi_and_control_bytes(value) when is_binary(value) do
     value

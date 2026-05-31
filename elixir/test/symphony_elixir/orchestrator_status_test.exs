@@ -274,6 +274,78 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.total_tokens == 16
   end
 
+  test "orchestrator snapshot tracks claude result usage when present" do
+    issue_id = "issue-claude-result-usage"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-203",
+      title: "Claude result usage test",
+      description: "Track Claude final usage",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-203"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :ClaudeResultUsageOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: "claude-1",
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :notification,
+         payload: %{
+           "type" => "result",
+           "subtype" => "success",
+           "usage" => %{"input_tokens" => 27_135, "output_tokens" => 14, "total_tokens" => 27_149}
+         },
+         timestamp: DateTime.utc_now()
+       }}
+    )
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.codex_input_tokens == 27_135
+    assert snapshot_entry.codex_output_tokens == 14
+    assert snapshot_entry.codex_total_tokens == 27_149
+
+    send(pid, {:DOWN, process_ref, :process, self(), :normal})
+    completed_state = :sys.get_state(pid)
+    assert completed_state.codex_totals.input_tokens == 27_135
+    assert completed_state.codex_totals.output_tokens == 14
+    assert completed_state.codex_totals.total_tokens == 27_149
+  end
+
   test "orchestrator snapshot tracks codex token-count cumulative usage payloads" do
     issue_id = "issue-token-count-snapshot"
 

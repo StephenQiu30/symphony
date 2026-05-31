@@ -346,6 +346,79 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.total_tokens == 27_149
   end
 
+  test "orchestrator snapshot tracks cursor result usage when present" do
+    issue_id = "issue-cursor-result-usage"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-204",
+      title: "Cursor result usage test",
+      description: "Track Cursor final usage",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-204"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :CursorResultUsageOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: "cursor-1",
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :notification,
+         cli_agent_runtime: "cursor",
+         payload: %{
+           "type" => "result",
+           "subtype" => "success",
+           "usage" => %{"input_tokens" => 101, "output_tokens" => 20, "total_tokens" => 121}
+         },
+         timestamp: DateTime.utc_now()
+       }}
+    )
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.codex_input_tokens == 101
+    assert snapshot_entry.codex_output_tokens == 20
+    assert snapshot_entry.codex_total_tokens == 121
+
+    send(pid, {:DOWN, process_ref, :process, self(), :normal})
+    completed_state = :sys.get_state(pid)
+    assert completed_state.codex_totals.input_tokens == 101
+    assert completed_state.codex_totals.output_tokens == 20
+    assert completed_state.codex_totals.total_tokens == 121
+  end
+
   test "orchestrator snapshot tracks codex token-count cumulative usage payloads" do
     issue_id = "issue-token-count-snapshot"
 
@@ -1726,6 +1799,39 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert StatusDashboard.humanize_codex_message(requesting) == "claude status: requesting"
     assert StatusDashboard.humanize_codex_message(text_delta) == "claude text streaming: updating workpad"
     assert StatusDashboard.humanize_codex_message(result) == "claude completed: completed"
+  end
+
+  test "status dashboard humanizes cursor stream-json events with cursor runtime label" do
+    requesting = %{
+      event: :notification,
+      message: %{
+        cli_agent_runtime: "cursor",
+        payload: %{"type" => "system", "subtype" => "status", "status" => "requesting"}
+      }
+    }
+
+    text_delta = %{
+      event: :notification,
+      message: %{
+        cli_agent_runtime: "cursor",
+        payload: %{
+          "type" => "stream_event",
+          "event" => %{
+            "type" => "content_block_delta",
+            "delta" => %{"type" => "text_delta", "text" => "updating workpad"}
+          }
+        }
+      }
+    }
+
+    result = %{
+      event: :notification,
+      message: %{cli_agent_runtime: "cursor", payload: %{"type" => "result", "subtype" => "success", "result" => "completed"}}
+    }
+
+    assert StatusDashboard.humanize_codex_message(requesting) == "cursor status: requesting"
+    assert StatusDashboard.humanize_codex_message(text_delta) == "cursor text streaming: updating workpad"
+    assert StatusDashboard.humanize_codex_message(result) == "cursor completed: completed"
   end
 
   test "status dashboard uses shell command line as exec command status text" do

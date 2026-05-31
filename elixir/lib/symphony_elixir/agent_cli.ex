@@ -105,7 +105,11 @@ defmodule SymphonyElixir.AgentCli do
   end
 
   defp headless_command(:cursor, command) when is_binary(command) do
-    ensure_flag(command, ~r/(^|\s)(-p|--print)(\s|$)/, "-p")
+    command
+    |> ensure_flag(~r/(^|\s)(-p|--print)(\s|$)/, "-p")
+    |> ensure_cursor_streaming_output()
+    |> ensure_flag(~r/(^|\s)--stream-partial-output(\s|$)/, "--stream-partial-output")
+    |> ensure_flag(~r/(^|\s)--approve-mcps(\s|$)/, "--approve-mcps")
   end
 
   defp ensure_flag(command, pattern, flag) when is_binary(command) and is_binary(flag) do
@@ -126,6 +130,19 @@ defmodule SymphonyElixir.AgentCli do
 
       true ->
         command <> " --output-format stream-json --include-partial-messages"
+    end
+  end
+
+  defp ensure_cursor_streaming_output(command) when is_binary(command) do
+    cond do
+      Regex.match?(~r/(^|\s)--output-format[=\s]stream-json(\s|$)/, command) ->
+        command
+
+      Regex.match?(~r/(^|\s)--output-format(\s|=)/, command) ->
+        command
+
+      true ->
+        command <> " --output-format stream-json"
     end
   end
 
@@ -176,7 +193,7 @@ defmodule SymphonyElixir.AgentCli do
     on_message.(message)
   end
 
-  defp emit_cli_line(:claude, on_message, line, metadata) do
+  defp emit_cli_line(runtime, on_message, line, metadata) when runtime in [:claude, :cursor] do
     case Jason.decode(line) do
       {:ok, payload} -> emit_message(on_message, :notification, %{payload: payload, raw: line}, metadata)
       {:error, _reason} -> emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)

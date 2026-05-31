@@ -1430,8 +1430,8 @@ defmodule SymphonyElixir.CoreTest do
       trace_file="${SYMP_TEST_CURSOR_TRACE}"
       printf 'PWD:%s\\n' "$PWD" >> "$trace_file"
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
-      printf 'PROMPT:%s\\n' "$5" >> "$trace_file"
-      printf 'completed\\n'
+      printf 'PROMPT:%s\\n' "$9" >> "$trace_file"
+      printf '%s\\n' '{"type":"result","subtype":"success","result":"completed"}'
       """)
 
       File.chmod!(cursor_binary, 0o755)
@@ -1477,7 +1477,10 @@ defmodule SymphonyElixir.CoreTest do
       trace = File.read!(trace_file)
       assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-45"))
       assert trace =~ "PWD:#{canonical_workspace}"
-      assert trace =~ "ARGV:-p --force --sandbox disabled Cursor prompt for STE-45: Run Cursor workflow"
+
+      assert trace =~
+               "ARGV:-p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps Cursor prompt for STE-45: Run Cursor workflow"
+
       assert trace =~ "PROMPT:Cursor prompt for STE-45: Run Cursor workflow"
     after
       File.rm_rf(test_root)
@@ -1747,6 +1750,74 @@ defmodule SymphonyElixir.CoreTest do
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "result", "result" => "done"}}}
 
       assert [] = Path.wildcard(Path.join(workspace, ".symphony-claude-prompt.*"))
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent parses cursor stream json and removes temporary prompt file" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-cursor-stream-json-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace = Path.join(test_root, "workspace")
+      cursor_binary = Path.join(test_root, "fake-cursor-agent")
+      trace_file = Path.join(test_root, "cursor.trace")
+      File.mkdir_p!(workspace)
+
+      File.write!(cursor_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CURSOR_STREAM_TRACE}"
+      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      printf '%s\\n' '{"type":"system","subtype":"status","status":"requesting"}'
+      printf '%s\\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}}'
+      printf '%s\\n' '{"type":"result","subtype":"success","result":"done","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}'
+      """)
+
+      File.chmod!(cursor_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+      cursor:
+        command: "#{cursor_binary} -p --force --sandbox disabled"
+      ---
+      Stream JSON prompt body.
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_CURSOR_STREAM_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CURSOR_STREAM_TRACE") end)
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-cursor-stream-json",
+        identifier: "STE-45",
+        title: "Parse Cursor stream JSON",
+        description: "Cursor stream-json should be structured",
+        state: "In Progress",
+        labels: []
+      }
+
+      assert {:ok, %{result: :turn_completed}} =
+               SymphonyElixir.AgentCli.run(:cursor, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+
+      assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "system", "status" => "requesting"}}}
+      assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "stream_event"}}}
+      assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "result", "result" => "done"}}}
+
+      trace = File.read!(trace_file)
+      assert trace =~ "--output-format stream-json"
+      assert trace =~ "--stream-partial-output"
+      assert trace =~ "--approve-mcps"
+      assert [] = Path.wildcard(Path.join(workspace, ".symphony-cursor-prompt.*"))
     after
       File.rm_rf(test_root)
     end

@@ -977,6 +977,61 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().worker.max_concurrent_agents_per_host == 2
   end
 
+  test "schema parses claude runtime configuration without requiring codex block" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    workspace:
+      root: "/tmp/symphony-claude-workspaces"
+    claude:
+      command: "claude -p --dangerously-skip-permissions"
+      turn_timeout_ms: 120000
+      read_timeout_ms: 1000
+    ---
+    Claude prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    config = Config.settings!()
+    assert config.claude.command == "claude -p --dangerously-skip-permissions"
+    assert config.claude.prompt_mode == "stdin"
+    assert config.claude.turn_timeout_ms == 120_000
+    assert config.claude.read_timeout_ms == 1_000
+    assert config.codex.command == "codex app-server"
+    assert Config.agent_runtime() == :claude
+    assert :ok = Config.validate!()
+  end
+
+  test "schema parses cursor runtime configuration and selects it from workflow" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    workspace:
+      root: "/tmp/symphony-cursor-workspaces"
+    cursor:
+      command: "cursor-agent -p --force --sandbox disabled"
+      turn_timeout_ms: 120000
+      read_timeout_ms: 1000
+    ---
+    Cursor prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    config = Config.settings!()
+    assert config.cursor.command == "cursor-agent -p --force --sandbox disabled"
+    assert config.cursor.prompt_mode == "argument"
+    assert config.cursor.turn_timeout_ms == 120_000
+    assert config.cursor.read_timeout_ms == 1_000
+    assert Config.agent_runtime() == :cursor
+    assert :ok = Config.validate!()
+  end
+
   test "schema helpers cover custom type and state limit validation" do
     assert StringOrMap.type() == :map
     assert StringOrMap.embed_as(:json) == :self

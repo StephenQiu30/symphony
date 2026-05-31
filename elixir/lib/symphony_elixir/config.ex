@@ -72,6 +72,24 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @spec agent_runtime() :: :codex | :claude | :cursor
+  def agent_runtime do
+    case Workflow.current() do
+      {:ok, %{config: %{"cursor" => cursor}}} when is_map(cursor) ->
+        :cursor
+
+      {:ok, %{config: %{"claude" => claude}}} when is_map(claude) ->
+        :claude
+
+      _ ->
+        :codex
+    end
+  end
+
+  @spec cli_agent_settings(:claude | :cursor) :: map()
+  def cli_agent_settings(:claude), do: settings!().claude
+  def cli_agent_settings(:cursor), do: settings!().cursor
+
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
     case Workflow.current() do

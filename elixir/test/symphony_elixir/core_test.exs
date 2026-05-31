@@ -1262,6 +1262,151 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "agent runner uses claude command when workflow declares claude runtime" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-claude-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      claude_binary = Path.join(test_root, "fake-claude")
+      trace_file = Path.join(test_root, "claude.trace")
+      File.mkdir_p!(workspace_root)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CLAUDE_TRACE}"
+      printf 'PWD:%s\\n' "$PWD" >> "$trace_file"
+      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      prompt="$(cat)"
+      printf 'PROMPT:%s\\n' "$prompt" >> "$trace_file"
+      printf 'completed\\n'
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      agent:
+        max_turns: 3
+      claude:
+        command: "#{claude_binary} -p --dangerously-skip-permissions"
+      ---
+      Claude prompt for {{ issue.identifier }}: {{ issue.title }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_CLAUDE_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CLAUDE_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-claude-runtime",
+        identifier: "STE-44",
+        title: "Run Claude workflow",
+        description: "Claude should receive the rendered prompt",
+        state: "In Progress",
+        url: "https://example.org/issues/STE-44",
+        labels: []
+      }
+
+      state_fetcher = fn ["issue-claude-runtime"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+
+      trace = File.read!(trace_file)
+      assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-44"))
+      assert trace =~ "PWD:#{canonical_workspace}"
+      assert trace =~ "ARGV:-p --dangerously-skip-permissions"
+      assert trace =~ "PROMPT:Claude prompt for STE-44: Run Claude workflow"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "agent runner uses cursor command when workflow declares cursor runtime" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-cursor-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      cursor_binary = Path.join(test_root, "fake-cursor-agent")
+      trace_file = Path.join(test_root, "cursor.trace")
+      File.mkdir_p!(workspace_root)
+
+      File.write!(cursor_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CURSOR_TRACE}"
+      printf 'PWD:%s\\n' "$PWD" >> "$trace_file"
+      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      printf 'PROMPT:%s\\n' "$5" >> "$trace_file"
+      printf 'completed\\n'
+      """)
+
+      File.chmod!(cursor_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      agent:
+        max_turns: 3
+      cursor:
+        command: "#{cursor_binary} -p --force --sandbox disabled"
+      ---
+      Cursor prompt for {{ issue.identifier }}: {{ issue.title }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_CURSOR_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_CURSOR_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-cursor-runtime",
+        identifier: "STE-45",
+        title: "Run Cursor workflow",
+        description: "Cursor should receive the rendered prompt",
+        state: "In Progress",
+        url: "https://example.org/issues/STE-45",
+        labels: []
+      }
+
+      state_fetcher = fn ["issue-cursor-runtime"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+
+      trace = File.read!(trace_file)
+      assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-45"))
+      assert trace =~ "PWD:#{canonical_workspace}"
+      assert trace =~ "ARGV:-p --force --sandbox disabled Cursor prompt for STE-45: Run Cursor workflow"
+      assert trace =~ "PROMPT:Cursor prompt for STE-45: Run Cursor workflow"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner surfaces ssh startup failures instead of silently hopping hosts" do
     test_root =
       Path.join(

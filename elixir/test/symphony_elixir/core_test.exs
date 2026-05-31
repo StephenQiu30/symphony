@@ -2288,7 +2288,7 @@ defmodule SymphonyElixir.CoreTest do
                  |> then(fn payload ->
                    payload["method"] == "thread/start" &&
                      get_in(payload, ["params", "approvalPolicy"]) == "never" &&
-                     get_in(payload, ["params", "sandbox"]) == "workspace-write" &&
+                     get_in(payload, ["params", "sandbox"]) == "danger-full-access" &&
                      get_in(payload, ["params", "cwd"]) == canonical_workspace
                  end)
                else
@@ -2296,14 +2296,7 @@ defmodule SymphonyElixir.CoreTest do
                end
              end)
 
-      expected_turn_sandbox_policy = %{
-        "type" => "workspaceWrite",
-        "writableRoots" => [canonical_workspace],
-        "readOnlyAccess" => %{"type" => "fullAccess"},
-        "networkAccess" => false,
-        "excludeTmpdirEnvVar" => false,
-        "excludeSlashTmp" => false
-      }
+      expected_turn_sandbox_policy = %{"type" => "dangerFullAccess"}
 
       assert Enum.any?(lines, fn line ->
                if String.starts_with?(line, "JSON:") do

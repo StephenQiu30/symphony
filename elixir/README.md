@@ -185,13 +185,16 @@ Notes:
 - If a value is missing, defaults are used.
 - Codex defaults are used when policy fields are omitted:
   - `codex.approval_policy` defaults to `never`
-  - `codex.thread_sandbox` defaults to `workspace-write`
-  - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy rooted at the current issue workspace
+  - `codex.thread_sandbox` defaults to `danger-full-access`
+  - `codex.turn_sandbox_policy` defaults to `dangerFullAccess`
 - Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, `granular`, and `never`.
 - Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
 - When `codex.turn_sandbox_policy` is set explicitly, Symphony passes the map through to Codex
   unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
   Symphony validation.
+- The elevated default is intended for trusted, unattended workspaces where git operations need to
+  write `.git/`, fetch, push, and run hooks without Codex sandbox prompts. Set stricter sandbox
+  fields explicitly in `WORKFLOW.md` for less trusted projects.
 - Claude Code and Cursor Agent are CLI runtimes. Symphony forces headless print mode and structured
   streaming output when the configured command omits the required flags, parses `stream-json`
   progress, extracts final `usage` from result payloads, and reports failures from error results,

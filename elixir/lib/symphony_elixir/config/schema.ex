@@ -173,7 +173,7 @@ defmodule SymphonyElixir.Config.Schema do
 
       field(:approval_policy, StringOrMap, default: "never")
 
-      field(:thread_sandbox, :string, default: "workspace-write")
+      field(:thread_sandbox, :string, default: "danger-full-access")
       field(:turn_sandbox_policy, :map)
       field(:turn_timeout_ms, :integer, default: 3_600_000)
       field(:read_timeout_ms, :integer, default: 30_000)
@@ -589,15 +589,8 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp normalize_plain_value(_value), do: nil
 
-  defp default_turn_sandbox_policy(workspace) do
-    %{
-      "type" => "workspaceWrite",
-      "writableRoots" => [workspace],
-      "readOnlyAccess" => %{"type" => "fullAccess"},
-      "networkAccess" => false,
-      "excludeTmpdirEnvVar" => false,
-      "excludeSlashTmp" => false
-    }
+  defp default_turn_sandbox_policy(_workspace) do
+    %{"type" => "dangerFullAccess"}
   end
 
   defp default_runtime_turn_sandbox_policy(workspace_root, opts) when is_binary(workspace_root) do
@@ -612,7 +605,7 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp default_runtime_turn_sandbox_policy(workspace_root, _opts) do
-    {:error, {:unsafe_turn_sandbox_policy, {:invalid_workspace_root, workspace_root}}}
+    {:ok, default_turn_sandbox_policy(workspace_root)}
   end
 
   defp default_workspace_root(workspace, _fallback) when is_binary(workspace) and workspace != "",

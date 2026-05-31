@@ -109,7 +109,7 @@ defmodule SymphonyElixir.TestSupport do
           max_concurrent_agents_by_state: %{},
           codex_command: "codex app-server",
           codex_approval_policy: "never",
-          codex_thread_sandbox: "workspace-write",
+          codex_thread_sandbox: "danger-full-access",
           codex_turn_sandbox_policy: nil,
           codex_turn_timeout_ms: 3_600_000,
           codex_read_timeout_ms: 30_000,

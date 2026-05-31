@@ -1432,14 +1432,7 @@ defmodule SymphonyElixir.AppServerTest do
       assert argv_line =~ "exec "
       assert argv_line =~ "fake-remote-codex app-server"
 
-      expected_turn_policy = %{
-        "type" => "workspaceWrite",
-        "writableRoots" => [remote_workspace],
-        "readOnlyAccess" => %{"type" => "fullAccess"},
-        "networkAccess" => false,
-        "excludeTmpdirEnvVar" => false,
-        "excludeSlashTmp" => false
-      }
+      expected_turn_policy = %{"type" => "dangerFullAccess"}
 
       assert Enum.any?(lines, fn line ->
                if String.starts_with?(line, "JSON:") do

@@ -183,17 +183,22 @@ Title: {{ issue.title }} Body: {{ issue.description }}
 Notes:
 
 - If a value is missing, defaults are used.
-- Safer Codex defaults are used when policy fields are omitted:
-  - `codex.approval_policy` defaults to `{"reject":{"sandbox_approval":true,"rules":true,"mcp_elicitations":true}}`
+- Codex defaults are used when policy fields are omitted:
+  - `codex.approval_policy` defaults to `never`
   - `codex.thread_sandbox` defaults to `workspace-write`
   - `codex.turn_sandbox_policy` defaults to a `workspaceWrite` policy rooted at the current issue workspace
-- Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, and `never`, and object-form `reject` is also supported.
+- Supported `codex.approval_policy` values depend on the targeted Codex app-server version. In the current local Codex schema, string values include `untrusted`, `on-failure`, `on-request`, `granular`, and `never`.
 - Supported `codex.thread_sandbox` values: `read-only`, `workspace-write`, `danger-full-access`.
 - When `codex.turn_sandbox_policy` is set explicitly, Symphony passes the map through to Codex
   unchanged. Compatibility then depends on the targeted Codex app-server version rather than local
   Symphony validation.
+- Claude Code and Cursor Agent are CLI runtimes. Symphony forces headless print mode and structured
+  streaming output when the configured command omits the required flags, parses `stream-json`
+  progress, extracts final `usage` from result payloads, and reports failures from error results,
+  non-zero exits, or timeouts through the same retry/blocking flow used by Codex.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+  This continuation loop also applies to Claude and Cursor CLI runtimes.
 - `agent.default_runtime` can be `codex`, `claude`, or `cursor`. If omitted, Symphony preserves the
   legacy inference rule: a workflow with `cursor:` defaults to Cursor, a workflow with `claude:`
   defaults to Claude, otherwise Codex.

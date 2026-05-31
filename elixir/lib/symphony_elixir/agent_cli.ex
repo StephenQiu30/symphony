@@ -151,37 +151,79 @@ defmodule SymphonyElixir.AgentCli do
       runtime,
       port,
       on_message,
-      session_id,
       metadata,
       Config.cli_agent_settings(runtime).turn_timeout_ms,
-      ""
+      "",
+      %{
+        session_id: session_id,
+        result_payload: nil,
+        failed_payload: nil
+      }
     )
   end
 
-  defp receive_loop(runtime, port, on_message, session_id, metadata, timeout_ms, pending_line) do
+  defp receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line, state) do
     receive do
       {^port, {:data, {:eol, chunk}}} ->
         line = pending_line <> to_string(chunk)
-        emit_cli_line(runtime, on_message, line, metadata)
-        receive_loop(runtime, port, on_message, session_id, metadata, timeout_ms, "")
+        state = emit_cli_line(runtime, on_message, line, metadata, state)
+        receive_loop(runtime, port, on_message, metadata, timeout_ms, "", state)
 
       {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(runtime, port, on_message, session_id, metadata, timeout_ms, pending_line <> to_string(chunk))
+        receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line <> to_string(chunk), state)
 
       {^port, {:exit_status, 0}} ->
-        if pending_line != "" do
-          emit_message(on_message, :notification, %{payload: pending_line, raw: pending_line}, metadata)
-        end
+        state =
+          if pending_line != "" do
+            emit_cli_line(runtime, on_message, pending_line, metadata, state)
+          else
+            state
+          end
 
-        emit_message(on_message, :turn_completed, %{session_id: session_id}, metadata)
-        {:ok, %{result: :turn_completed, session_id: session_id, thread_id: session_id, turn_id: "turn-1"}}
+        complete_cli_turn(runtime, on_message, metadata, state)
 
       {^port, {:exit_status, status}} ->
-        {:error, {:cli_agent_exit, runtime, status}}
+        reason = {:cli_agent_exit, runtime, status}
+        emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: reason}, metadata)
+        {:error, reason}
     after
       timeout_ms ->
+        emit_message(
+          on_message,
+          :turn_ended_with_error,
+          %{session_id: state.session_id, reason: :turn_timeout},
+          metadata
+        )
+
         {:error, :turn_timeout}
     end
+  end
+
+  defp complete_cli_turn(runtime, on_message, metadata, %{failed_payload: failed_payload} = state)
+       when is_map(failed_payload) do
+    reason = {:cli_agent_failed, runtime, failed_payload}
+
+    emit_message(
+      on_message,
+      :turn_failed,
+      %{session_id: state.session_id, payload: failed_payload, reason: reason},
+      metadata
+    )
+
+    {:error, reason}
+  end
+
+  defp complete_cli_turn(_runtime, on_message, metadata, state) do
+    payload = state.result_payload || %{}
+
+    completion_payload =
+      payload
+      |> Map.put_new("type", "result")
+      |> Map.put_new("subtype", "success")
+      |> Map.put("session_id", state.session_id)
+
+    emit_message(on_message, :turn_completed, %{session_id: state.session_id, payload: completion_payload}, metadata)
+    {:ok, %{result: :turn_completed, session_id: state.session_id, thread_id: state.session_id, turn_id: "turn-1"}}
   end
 
   defp emit_message(on_message, event, payload, metadata) do
@@ -193,15 +235,68 @@ defmodule SymphonyElixir.AgentCli do
     on_message.(message)
   end
 
-  defp emit_cli_line(runtime, on_message, line, metadata) when runtime in [:claude, :cursor] do
+  defp emit_cli_line(runtime, on_message, line, metadata, state) when runtime in [:claude, :cursor] do
     case Jason.decode(line) do
-      {:ok, payload} -> emit_message(on_message, :notification, %{payload: payload, raw: line}, metadata)
-      {:error, _reason} -> emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)
+      {:ok, payload} ->
+        emit_message(on_message, :notification, %{payload: payload, raw: line}, metadata)
+        update_cli_state_from_payload(state, payload)
+
+      {:error, _reason} ->
+        emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)
+        state
     end
   end
 
-  defp emit_cli_line(_runtime, on_message, line, metadata) do
+  defp emit_cli_line(_runtime, on_message, line, metadata, state) do
     emit_message(on_message, :notification, %{payload: line, raw: line}, metadata)
+    state
+  end
+
+  defp update_cli_state_from_payload(state, %{} = payload) do
+    state
+    |> maybe_update_cli_session_id(payload)
+    |> maybe_record_cli_result(payload)
+  end
+
+  defp maybe_update_cli_session_id(state, payload) do
+    case map_value(payload, ["session_id", :session_id]) do
+      session_id when is_binary(session_id) and session_id != "" -> %{state | session_id: session_id}
+      _ -> state
+    end
+  end
+
+  defp maybe_record_cli_result(state, payload) do
+    if cli_result_payload?(payload) do
+      state = %{state | result_payload: payload}
+
+      if cli_failed_result?(payload) do
+        %{state | failed_payload: payload}
+      else
+        state
+      end
+    else
+      state
+    end
+  end
+
+  defp cli_result_payload?(payload) do
+    map_value(payload, ["type", :type]) == "result"
+  end
+
+  defp cli_failed_result?(payload) do
+    subtype = map_value(payload, ["subtype", :subtype])
+    is_error = map_value(payload, ["is_error", :is_error])
+
+    is_error == true or (is_binary(subtype) and subtype not in ["success", ""])
+  end
+
+  defp map_value(%{} = map, keys) when is_list(keys) do
+    Enum.find_value(keys, fn key ->
+      case Map.fetch(map, key) do
+        {:ok, value} -> value
+        :error -> nil
+      end
+    end)
   end
 
   defp stop_port(port) when is_port(port) do

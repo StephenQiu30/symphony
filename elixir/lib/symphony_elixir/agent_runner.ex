@@ -77,7 +77,7 @@ defmodule SymphonyElixir.AgentRunner do
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
   defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
-    case Config.agent_runtime() do
+    case Config.agent_runtime(issue) do
       runtime when runtime in [:claude, :cursor] ->
         run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
 

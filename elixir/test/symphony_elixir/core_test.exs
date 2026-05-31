@@ -1338,6 +1338,80 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "agent runner uses issue label to override default runtime" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-label-runtime-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      claude_binary = Path.join(test_root, "fake-claude")
+      trace_file = Path.join(test_root, "label-runtime.trace")
+      File.mkdir_p!(workspace_root)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      printf 'ARGV:%s\\n' "$*" >> "${SYMP_TEST_LABEL_RUNTIME_TRACE}"
+      printf 'PROMPT:%s\\n' "$(cat)" >> "${SYMP_TEST_LABEL_RUNTIME_TRACE}"
+      printf 'completed\\n'
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+        active_states: [Todo, In Progress]
+        terminal_states: [Done]
+      workspace:
+        root: "#{workspace_root}"
+      agent:
+        default_runtime: codex
+        max_turns: 3
+        runtime_by_label:
+          agent:claude: claude
+      claude:
+        command: "#{claude_binary} -p --dangerously-skip-permissions"
+      ---
+      Label runtime prompt for {{ issue.identifier }}: {{ issue.title }}
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      System.put_env("SYMP_TEST_LABEL_RUNTIME_TRACE", trace_file)
+      on_exit(fn -> System.delete_env("SYMP_TEST_LABEL_RUNTIME_TRACE") end)
+
+      issue = %Issue{
+        id: "issue-label-runtime",
+        identifier: "STE-44",
+        title: "Use Claude label",
+        description: "The issue label should select Claude",
+        state: "In Progress",
+        url: "https://example.org/issues/STE-44",
+        labels: ["agent:claude"]
+      }
+
+      state_fetcher = fn ["issue-label-runtime"] ->
+        {:ok, [%{issue | state: "Done"}]}
+      end
+
+      assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
+
+      trace = File.read!(trace_file)
+
+      assert trace =~
+               "ARGV:-p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose"
+
+      assert trace =~ "PROMPT:Label runtime prompt for STE-44: Use Claude label"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
   test "agent runner uses cursor command when workflow declares cursor runtime" do
     test_root =
       Path.join(

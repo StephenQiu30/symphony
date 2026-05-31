@@ -73,7 +73,54 @@ defmodule SymphonyElixir.Config do
   end
 
   @spec agent_runtime() :: :codex | :claude | :cursor
-  def agent_runtime do
+  @spec agent_runtime(term()) :: :codex | :claude | :cursor
+  def agent_runtime(issue \\ nil) do
+    settings = settings!()
+
+    issue
+    |> issue_label_runtime(settings)
+    |> case do
+      nil -> default_agent_runtime(settings)
+      runtime -> runtime
+    end
+  end
+
+  defp issue_label_runtime(nil, _settings), do: nil
+
+  defp issue_label_runtime(%{labels: labels}, settings) when is_list(labels) do
+    label_map = settings.agent.runtime_by_label || %{}
+
+    labels
+    |> Enum.map(&Schema.normalize_label/1)
+    |> Enum.find_value(fn label ->
+      case Map.get(label_map, label) do
+        "codex" -> :codex
+        "claude" -> :claude
+        "cursor" -> :cursor
+        _ -> nil
+      end
+    end)
+  end
+
+  defp issue_label_runtime(_issue, _settings), do: nil
+
+  defp default_agent_runtime(settings) do
+    case settings.agent.default_runtime do
+      "codex" ->
+        :codex
+
+      "claude" ->
+        :claude
+
+      "cursor" ->
+        :cursor
+
+      _ ->
+        infer_agent_runtime_from_workflow()
+    end
+  end
+
+  defp infer_agent_runtime_from_workflow do
     case Workflow.current() do
       {:ok, %{config: %{"cursor" => cursor}}} when is_map(cursor) ->
         :cursor

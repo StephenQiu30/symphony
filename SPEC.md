@@ -412,6 +412,9 @@ Fields:
 - `max_concurrent_agents` (integer)
   - Default: `10`
   - Changes SHOULD be re-applied at runtime and affect subsequent dispatch decisions.
+- `default_runtime` (`codex` | `claude` | `cursor`, optional)
+  - Selects the runtime used when no issue label override matches.
+  - When omitted, implementations SHOULD preserve legacy inference from configured runtime blocks.
 - `max_turns` (positive integer)
   - Default: `20`
   - Limits the number of coding-agent turns within one worker session.
@@ -423,6 +426,11 @@ Fields:
   - Default: empty map.
   - State keys are normalized (`lowercase`) for lookup.
   - Invalid entries (non-positive or non-numeric) are ignored.
+- `runtime_by_label` (map `label_name -> runtime`)
+  - Default: empty map.
+  - Label keys are normalized by trimming and lowercasing before lookup.
+  - The first issue label matching this map selects the runtime for that issue.
+  - Runtime values MUST be one of `codex`, `claude`, or `cursor`.
 
 #### 5.3.6 `codex` (object)
 
@@ -584,9 +592,11 @@ not require recognizing or validating extension fields unless that extension is 
 - `hooks.before_remove`: shell script or null
 - `hooks.timeout_ms`: integer, default `60000`
 - `agent.max_concurrent_agents`: integer, default `10`
+- `agent.default_runtime`: `codex`, `claude`, or `cursor`, optional
 - `agent.max_turns`: integer, default `20`
 - `agent.max_retry_backoff_ms`: integer, default `300000` (5m)
 - `agent.max_concurrent_agents_by_state`: map of positive integers, default `{}`
+- `agent.runtime_by_label`: map of Linear label names to runtime names, default `{}`
 - `codex.command`: shell command string, default `codex app-server`
 - `codex.approval_policy`: Codex `AskForApproval` value, default implementation-defined
 - `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined

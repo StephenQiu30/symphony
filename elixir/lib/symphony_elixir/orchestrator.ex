@@ -1712,20 +1712,34 @@ defmodule SymphonyElixir.Orchestrator do
   defp absolute_token_usage_from_payload(_payload), do: nil
 
   defp turn_completed_usage_from_payload(payload) when is_map(payload) do
-    method = Map.get(payload, "method") || Map.get(payload, :method)
-
-    if method in ["turn/completed", :turn_completed] do
-      direct =
-        Map.get(payload, "usage") ||
-          Map.get(payload, :usage) ||
-          map_at_path(payload, ["params", "usage"]) ||
-          map_at_path(payload, [:params, :usage])
-
-      if is_map(direct) and integer_token_map?(direct), do: direct
+    if token_usage_completion_event?(payload) do
+      payload
+      |> direct_usage_payload()
+      |> integer_token_payload()
     end
   end
 
   defp turn_completed_usage_from_payload(_payload), do: nil
+
+  defp token_usage_completion_event?(payload) do
+    method = Map.get(payload, "method") || Map.get(payload, :method)
+    type = Map.get(payload, "type") || Map.get(payload, :type)
+    subtype = Map.get(payload, "subtype") || Map.get(payload, :subtype)
+
+    method in ["turn/completed", :turn_completed] or
+      {type, subtype} in [{"result", "success"}, {:result, :success}]
+  end
+
+  defp direct_usage_payload(payload) do
+    Map.get(payload, "usage") ||
+      Map.get(payload, :usage) ||
+      map_at_path(payload, ["params", "usage"]) ||
+      map_at_path(payload, [:params, :usage])
+  end
+
+  defp integer_token_payload(payload) do
+    if is_map(payload) and integer_token_map?(payload), do: payload
+  end
 
   defp rate_limits_from_payload(payload) when is_map(payload) do
     direct = Map.get(payload, "rate_limits") || Map.get(payload, :rate_limits)

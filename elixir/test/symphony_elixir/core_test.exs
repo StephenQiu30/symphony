@@ -1808,6 +1808,10 @@ defmodule SymphonyElixir.CoreTest do
       assert {:ok, %{result: :turn_completed, session_id: "claude-session-1"}} =
                SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
 
+      assert_receive {:agent_message, %{event: :session_started, codex_app_server_pid: cli_pid}}
+      assert is_binary(cli_pid)
+      assert cli_pid =~ ~r/^\d+$/
+
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "system", "status" => "requesting"}}}
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "stream_event"}}}
       assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "result", "result" => "done"}}}

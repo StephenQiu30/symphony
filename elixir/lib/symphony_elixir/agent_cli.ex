@@ -18,21 +18,23 @@ defmodule SymphonyElixir.AgentCli do
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
     metadata = %{cli_agent_runtime: to_string(runtime), cli_agent_session_id: session_id}
 
-    emit_message(
-      on_message,
-      :session_started,
-      %{
-        session_id: session_id,
-        thread_id: session_id,
-        turn_id: "turn-1"
-      },
-      metadata
-    )
-
     Logger.info("#{runtime} CLI session started for #{issue_context(issue)} session_id=#{session_id}")
 
     case start_port(runtime, workspace, prompt, worker_host) do
       {:ok, port} ->
+        metadata = Map.merge(metadata, port_metadata(port))
+
+        emit_message(
+          on_message,
+          :session_started,
+          %{
+            session_id: session_id,
+            thread_id: session_id,
+            turn_id: "turn-1"
+          },
+          metadata
+        )
+
         try do
           await_completion(runtime, port, on_message, session_id, metadata)
         after
@@ -306,6 +308,13 @@ defmodule SymphonyElixir.AgentCli do
     Port.close(port)
   rescue
     ArgumentError -> :ok
+  end
+
+  defp port_metadata(port) when is_port(port) do
+    case :erlang.port_info(port, :os_pid) do
+      {:os_pid, os_pid} -> %{codex_app_server_pid: Integer.to_string(os_pid)}
+      _ -> %{}
+    end
   end
 
   defp default_on_message(_message), do: :ok

@@ -1724,10 +1724,9 @@ defmodule SymphonyElixir.Orchestrator do
   defp token_usage_completion_event?(payload) do
     method = Map.get(payload, "method") || Map.get(payload, :method)
     type = Map.get(payload, "type") || Map.get(payload, :type)
-    subtype = Map.get(payload, "subtype") || Map.get(payload, :subtype)
 
     method in ["turn/completed", :turn_completed] or
-      {type, subtype} in [{"result", "success"}, {:result, :success}]
+      type in ["result", :result]
   end
 
   defp direct_usage_payload(payload) do

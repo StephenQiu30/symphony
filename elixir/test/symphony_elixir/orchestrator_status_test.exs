@@ -346,6 +346,74 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert completed_state.codex_totals.total_tokens == 27_149
   end
 
+  test "orchestrator snapshot tracks claude error result usage when present" do
+    issue_id = "issue-claude-error-result-usage"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "MT-205",
+      title: "Claude error result usage test",
+      description: "Track Claude final usage even when result is an error",
+      state: "In Progress",
+      url: "https://example.org/issues/MT-205"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :ClaudeErrorResultUsageOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    initial_state = :sys.get_state(pid)
+    process_ref = make_ref()
+
+    running_entry = %{
+      pid: self(),
+      ref: process_ref,
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: "claude-rate-limit",
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn _ ->
+      initial_state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(initial_state.claimed, issue_id))
+    end)
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :notification,
+         payload: %{
+           "type" => "result",
+           "subtype" => "error",
+           "is_error" => true,
+           "error" => "rate_limit",
+           "usage" => %{"input_tokens" => 8_000, "output_tokens" => 0, "total_tokens" => 8_000}
+         },
+         timestamp: DateTime.utc_now()
+       }}
+    )
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.codex_input_tokens == 8_000
+    assert snapshot_entry.codex_output_tokens == 0
+    assert snapshot_entry.codex_total_tokens == 8_000
+  end
+
   test "orchestrator snapshot tracks cursor result usage when present" do
     issue_id = "issue-cursor-result-usage"
 

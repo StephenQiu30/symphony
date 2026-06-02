@@ -21,7 +21,8 @@ workspace:
   root: "$SYMPHONY_WORKSPACE_ROOT"
 hooks:
   after_create: |
-    git clone --depth 1 "$SOURCE_REPO_URL" .
+    target_branch="${SYMPHONY_TARGET_BRANCH:-feature/video-workflow}"
+    git clone --depth 1 --branch "$target_branch" "$SOURCE_REPO_URL" .
     if command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
     fi

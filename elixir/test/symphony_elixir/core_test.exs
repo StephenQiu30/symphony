@@ -1450,7 +1450,7 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "agent runner uses cursor command when workflow declares cursor runtime" do
+  test "agent runner uses cursor app-server bridge when workflow declares cursor runtime" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -1459,7 +1459,7 @@ defmodule SymphonyElixir.CoreTest do
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
-      cursor_binary = Path.join(test_root, "fake-cursor-agent")
+      cursor_binary = Path.join(test_root, "fake-cursor-bridge")
       trace_file = Path.join(test_root, "cursor.trace")
       File.mkdir_p!(workspace_root)
 
@@ -1468,8 +1468,26 @@ defmodule SymphonyElixir.CoreTest do
       trace_file="${SYMP_TEST_CURSOR_TRACE}"
       printf 'PWD:%s\\n' "$PWD" >> "$trace_file"
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
-      printf 'PROMPT:%s\\n' "$9" >> "$trace_file"
-      printf '%s\\n' '{"type":"result","subtype":"success","result":"completed"}'
+      count=0
+
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+        case "$count" in
+          1)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          2)
+            ;;
+          3)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"cursor-thread-45"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"cursor-turn-45"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            ;;
+        esac
+      done
       """)
 
       File.chmod!(cursor_binary, 0o755)
@@ -1485,7 +1503,7 @@ defmodule SymphonyElixir.CoreTest do
       agent:
         max_turns: 3
       cursor:
-        command: "#{cursor_binary} -p --force --sandbox disabled"
+        command: "#{cursor_binary}"
       ---
       Cursor prompt for {{ issue.identifier }}: {{ issue.title }}
       """
@@ -1519,16 +1537,32 @@ defmodule SymphonyElixir.CoreTest do
 
       assert trace =~ "PWD:#{canonical_workspace}"
 
-      assert trace =~
-               "ARGV:-p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps Cursor prompt for STE-45: Run Cursor workflow"
+      assert trace =~ "ARGV:"
+      refute trace =~ "--output-format stream-json"
+      refute trace =~ "--approve-mcps"
+      refute trace =~ "ARGV:Cursor prompt for STE-45"
 
-      assert trace =~ "PROMPT:Cursor prompt for STE-45: Run Cursor workflow"
+      turn_payload =
+        trace
+        |> String.split("\n", trim: true)
+        |> Enum.find(fn line ->
+          String.starts_with?(line, "JSON:") and
+            String.contains?(line, "\"method\":\"turn/start\"")
+        end)
+        |> String.trim_leading("JSON:")
+        |> Jason.decode!()
+
+      assert get_in(turn_payload, ["params", "threadId"]) == "cursor-thread-45"
+
+      assert turn_payload["params"]["input"]
+             |> Enum.map_join("", &Map.get(&1, "text", "")) =~
+               "Cursor prompt for STE-45: Run Cursor workflow"
     after
       File.rm_rf(test_root)
     end
   end
 
-  test "cli agent launch forces cursor command into high-permission headless mode" do
+  test "cursor app-server launch sends policy in JSON instead of headless argv flags" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -1537,14 +1571,33 @@ defmodule SymphonyElixir.CoreTest do
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
-      cursor_binary = Path.join(test_root, "fake-cursor-agent")
+      cursor_binary = Path.join(test_root, "fake-cursor-bridge")
       trace_file = Path.join(test_root, "cursor-permissions.trace")
       File.mkdir_p!(workspace_root)
 
       File.write!(cursor_binary, """
       #!/bin/sh
       printf 'ARGV:%s\\n' "$*" >> "${SYMP_TEST_CURSOR_PERMISSIONS_TRACE}"
-      printf '%s\\n' '{"type":"result","subtype":"success","result":"completed"}'
+      count=0
+
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "${SYMP_TEST_CURSOR_PERMISSIONS_TRACE}"
+        case "$count" in
+          1)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          2)
+            ;;
+          3)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"cursor-thread-policy"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"cursor-turn-policy"}}}'
+            printf '%s\\n' '{"method":"turn/completed"}'
+            ;;
+        esac
+      done
       """)
 
       File.chmod!(cursor_binary, 0o755)
@@ -1559,6 +1612,10 @@ defmodule SymphonyElixir.CoreTest do
         root: "#{workspace_root}"
       cursor:
         command: "#{cursor_binary}"
+        approval_policy: never
+        thread_sandbox: workspace-write
+        turn_sandbox_policy:
+          type: workspaceWrite
       ---
       Cursor permission prompt for {{ issue.identifier }}
       """
@@ -1584,8 +1641,40 @@ defmodule SymphonyElixir.CoreTest do
 
       assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
 
-      assert File.read!(trace_file) =~
-               "ARGV:-p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps Cursor permission prompt for STE-45"
+      trace = File.read!(trace_file)
+
+      assert trace =~ "ARGV:"
+      refute trace =~ "--sandbox disabled"
+      refute trace =~ "--output-format stream-json"
+
+      assert Enum.any?(String.split(trace, "\n", trim: true), fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 line
+                 |> String.trim_leading("JSON:")
+                 |> Jason.decode!()
+                 |> then(fn payload ->
+                   payload["method"] == "thread/start" &&
+                     get_in(payload, ["params", "approvalPolicy"]) == "never" &&
+                     get_in(payload, ["params", "sandbox"]) == "workspace-write"
+                 end)
+               else
+                 false
+               end
+             end)
+
+      assert Enum.any?(String.split(trace, "\n", trim: true), fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 line
+                 |> String.trim_leading("JSON:")
+                 |> Jason.decode!()
+                 |> then(fn payload ->
+                   payload["method"] == "turn/start" &&
+                     get_in(payload, ["params", "sandboxPolicy"]) == %{"type" => "workspaceWrite"}
+                 end)
+               else
+                 false
+               end
+             end)
     after
       File.rm_rf(test_root)
     end

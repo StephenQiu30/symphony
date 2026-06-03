@@ -51,7 +51,10 @@ defmodule SymphonyElixir.Config.Schema do
       field(:project_slug, :string)
       field(:assignee, :string)
       field(:active_states, {:array, :string}, default: ["Todo", "In Progress"])
-      field(:terminal_states, {:array, :string}, default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"])
+
+      field(:terminal_states, {:array, :string},
+        default: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+      )
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -211,6 +214,9 @@ defmodule SymphonyElixir.Config.Schema do
     @primary_key false
     embedded_schema do
       field(:command, :string, default: "claude -p --dangerously-skip-permissions")
+      field(:approval_policy, StringOrMap, default: "never")
+      field(:thread_sandbox, :string, default: "danger-full-access")
+      field(:turn_sandbox_policy, :map)
       field(:prompt_mode, :string, default: "stdin")
       field(:turn_timeout_ms, :integer, default: 3_600_000)
       field(:read_timeout_ms, :integer, default: 5_000)
@@ -219,7 +225,19 @@ defmodule SymphonyElixir.Config.Schema do
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:command, :prompt_mode, :turn_timeout_ms, :read_timeout_ms], empty_values: [])
+      |> cast(
+        attrs,
+        [
+          :command,
+          :approval_policy,
+          :thread_sandbox,
+          :turn_sandbox_policy,
+          :prompt_mode,
+          :turn_timeout_ms,
+          :read_timeout_ms
+        ],
+        empty_values: []
+      )
       |> validate_required([:command])
       |> validate_inclusion(:prompt_mode, ["stdin", "argument"])
       |> validate_number(:turn_timeout_ms, greater_than: 0)
@@ -235,6 +253,9 @@ defmodule SymphonyElixir.Config.Schema do
     @primary_key false
     embedded_schema do
       field(:command, :string, default: "cursor-agent -p --force --sandbox disabled")
+      field(:approval_policy, StringOrMap, default: "never")
+      field(:thread_sandbox, :string, default: "danger-full-access")
+      field(:turn_sandbox_policy, :map)
       field(:prompt_mode, :string, default: "argument")
       field(:turn_timeout_ms, :integer, default: 3_600_000)
       field(:read_timeout_ms, :integer, default: 5_000)
@@ -243,7 +264,19 @@ defmodule SymphonyElixir.Config.Schema do
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:command, :prompt_mode, :turn_timeout_ms, :read_timeout_ms], empty_values: [])
+      |> cast(
+        attrs,
+        [
+          :command,
+          :approval_policy,
+          :thread_sandbox,
+          :turn_sandbox_policy,
+          :prompt_mode,
+          :turn_timeout_ms,
+          :read_timeout_ms
+        ],
+        empty_values: []
+      )
       |> validate_required([:command])
       |> validate_inclusion(:prompt_mode, ["stdin", "argument"])
       |> validate_number(:turn_timeout_ms, greater_than: 0)
@@ -268,7 +301,9 @@ defmodule SymphonyElixir.Config.Schema do
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
     def changeset(schema, attrs) do
       schema
-      |> cast(attrs, [:after_create, :before_run, :after_run, :before_remove, :timeout_ms], empty_values: [])
+      |> cast(attrs, [:after_create, :before_run, :after_run, :before_remove, :timeout_ms],
+        empty_values: []
+      )
       |> validate_number(:timeout_ms, greater_than: 0)
     end
   end
@@ -371,6 +406,20 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
+  @spec resolve_agent_turn_sandbox_policy(map(), %__MODULE__{}, Path.t() | nil, keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def resolve_agent_turn_sandbox_policy(agent_settings, settings, workspace \\ nil, opts \\ []) do
+    case Map.get(agent_settings, :turn_sandbox_policy) do
+      %{} = policy ->
+        {:ok, policy}
+
+      _ ->
+        workspace
+        |> default_workspace_root(settings.workspace.root)
+        |> default_runtime_turn_sandbox_policy(opts)
+    end
+  end
+
   @spec normalize_issue_state(String.t()) :: String.t()
   def normalize_issue_state(state_name) when is_binary(state_name) do
     String.downcase(state_name)
@@ -462,14 +511,24 @@ defmodule SymphonyElixir.Config.Schema do
   defp finalize_settings(settings) do
     tracker = %{
       settings.tracker
-      | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
-        project_slug: resolve_plain_setting(settings.tracker.project_slug, System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")),
-        assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
+      | api_key:
+          resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
+        project_slug:
+          resolve_plain_setting(
+            settings.tracker.project_slug,
+            System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")
+          ),
+        assignee:
+          resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
     }
 
     workspace = %{
       settings.workspace
-      | root: resolve_path_value(settings.workspace.root, Path.join(System.tmp_dir!(), "symphony_workspaces"))
+      | root:
+          resolve_path_value(
+            settings.workspace.root,
+            Path.join(System.tmp_dir!(), "symphony_workspaces")
+          )
     }
 
     codex = %{
@@ -478,7 +537,26 @@ defmodule SymphonyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    claude = %{
+      settings.claude
+      | approval_policy: normalize_keys(settings.claude.approval_policy),
+        turn_sandbox_policy: normalize_optional_map(settings.claude.turn_sandbox_policy)
+    }
+
+    cursor = %{
+      settings.cursor
+      | approval_policy: normalize_keys(settings.cursor.approval_policy),
+        turn_sandbox_policy: normalize_optional_map(settings.cursor.turn_sandbox_policy)
+    }
+
+    %{
+      settings
+      | tracker: tracker,
+        workspace: workspace,
+        codex: codex,
+        claude: claude,
+        cursor: cursor
+    }
   end
 
   defp normalize_keys(value) when is_map(value) do

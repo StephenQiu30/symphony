@@ -1,19 +1,25 @@
 # Cursor Agent Integration
 
-Symphony can route Linear issues to Cursor through the `cursor` runtime.
+Symphony can route Linear issues to Cursor through the `cursor` runtime. The
+current path uses a long-lived Cursor ACP bridge so Cursor follows the same
+session shape as Codex app-server runs.
 
-The current production path uses Cursor Agent headless mode:
+The bridge command is intentionally short and portable:
 
 ```sh
-cursor-symphony-bridge -p --force --sandbox disabled --output-format stream-json
+cursor-symphony-bridge
 ```
 
-`AgentCli` appends the required headless flags when they are missing, so
-workflow configs should prefer the short command:
+Workflow configs should prefer the env-driven command so other machines do not
+need a hardcoded user path:
 
 ```yaml
 cursor:
   command: '"${SYMPHONY_CURSOR_BRIDGE:-cursor-symphony-bridge}"'
+  approval_policy: never
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+    type: workspaceWrite
 ```
 
 ## Install The Bridge
@@ -40,7 +46,10 @@ SYMPHONY_CURSOR_BRIDGE=/path/to/symphony/scripts/cursor-symphony-bridge
 
 ## Authentication Modes
 
-Cursor Agent supports both local login and API-key authentication.
+Cursor Agent supports both local login and API-key authentication. The bridge
+does not hardcode an account and does not assume `popcornqhd@gmail.com`; it uses
+the active Cursor CLI login on the current machine unless `CURSOR_API_KEY` is
+set.
 
 For a developer machine, prefer the Cursor login stored by the CLI:
 
@@ -55,46 +64,26 @@ For CI or non-interactive machines, use an API key:
 CURSOR_API_KEY=...
 ```
 
-The bridge does not hardcode an account. It uses whatever `cursor-agent` uses
-on the current machine. To prevent accidental use of the wrong local account,
-set:
+To prevent accidental use of the wrong local account, set:
 
 ```env
 SYMPHONY_CURSOR_EXPECTED_ACCOUNT=you@example.com
 ```
 
-When set, the bridge runs `cursor-agent status` before launching and fails fast
-if the active account does not match.
+When set, the bridge runs Cursor CLI `status` before launching and fails fast if
+the active account does not match. Leave it blank if the current machine should
+use whichever Cursor account is logged in.
 
 ## Observability
 
-Cursor Agent `stream-json` emits a `system/init` event with fields such as
-`apiKeySource`, `session_id`, `model`, `permissionMode`, and `cwd`.
-Symphony emits a `runtime_authenticated` event from that payload so dashboards
-and logs can distinguish:
+Cursor runs now emit the same Symphony app-server events as Codex, including
+`session_started`, turn notifications, and `turn/completed`. The bridge also
+writes a local activity log under:
 
-- `login` — local `cursor-agent login` account
-- `env` — `CURSOR_API_KEY`
-- `flag` — explicit `--api-key`
+```text
+~/.cache/symphony-logs/cursor-bridge-<pid>.log
+```
 
-Token accounting depends on Cursor's emitted payloads. Symphony records usage
-when Cursor emits `result.usage`, including on non-zero exits, but Cursor may
-omit token counts for some accounts or CLI versions.
-
-## Reference: ACP Bridge
-
-The `wildmaker/symphony` fork demonstrates a deeper Cursor integration through
-Cursor CLI ACP (`agent acp`). That bridge keeps a long-lived Cursor session and
-adapts it to Symphony's app-server JSON-RPC shape.
-
-That design is a better long-term direction when Cursor should behave like
-Codex app-server:
-
-- persistent sessions across turns
-- one long-lived backend process per workspace
-- ACP permission handling
-- optional MCP injection
-
-Migrating to ACP should be done as a separate runtime-path change because this
-repository currently routes Cursor through the CLI runtime (`AgentCli`), while
-Codex uses the app-server path (`Codex.AppServer`).
+Token accounting depends on Cursor ACP's response payload. Symphony records
+usage when the bridge receives a `usage` map and forwards it with
+`turn/completed`; some Cursor accounts or CLI versions may omit token counts.

@@ -166,6 +166,14 @@ defmodule SymphonyElixir.Config do
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
   def codex_runtime_settings(workspace \\ nil, opts \\ []) do
+    agent_app_server_settings(:codex, workspace, opts)
+  end
+
+  @spec agent_app_server_settings(:codex | :cursor | :claude, Path.t() | nil, keyword()) ::
+          {:ok, codex_runtime_settings()} | {:error, term()}
+  def agent_app_server_settings(runtime, workspace \\ nil, opts \\ [])
+
+  def agent_app_server_settings(:codex, workspace, opts) do
     with {:ok, settings} <- settings() do
       with {:ok, turn_sandbox_policy} <-
              Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts) do
@@ -173,6 +181,34 @@ defmodule SymphonyElixir.Config do
          %{
            approval_policy: settings.codex.approval_policy,
            thread_sandbox: settings.codex.thread_sandbox,
+           turn_sandbox_policy: turn_sandbox_policy
+         }}
+      end
+    end
+  end
+
+  def agent_app_server_settings(:cursor, workspace, opts) do
+    with {:ok, settings} <- settings() do
+      with {:ok, turn_sandbox_policy} <-
+             Schema.resolve_agent_turn_sandbox_policy(settings.cursor, settings, workspace, opts) do
+        {:ok,
+         %{
+           approval_policy: settings.cursor.approval_policy,
+           thread_sandbox: settings.cursor.thread_sandbox,
+           turn_sandbox_policy: turn_sandbox_policy
+         }}
+      end
+    end
+  end
+
+  def agent_app_server_settings(:claude, workspace, opts) do
+    with {:ok, settings} <- settings() do
+      with {:ok, turn_sandbox_policy} <-
+             Schema.resolve_agent_turn_sandbox_policy(settings.claude, settings, workspace, opts) do
+        {:ok,
+         %{
+           approval_policy: settings.claude.approval_policy,
+           thread_sandbox: settings.claude.thread_sandbox,
            turn_sandbox_policy: turn_sandbox_policy
          }}
       end

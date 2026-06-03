@@ -51,6 +51,10 @@ claude:
   command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
 cursor:
   command: '"${SYMPHONY_CURSOR_BRIDGE:-cursor-symphony-bridge}"'
+  approval_policy: never
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+    type: workspaceWrite
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

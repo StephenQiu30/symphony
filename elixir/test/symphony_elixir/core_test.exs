@@ -118,10 +118,9 @@ defmodule SymphonyElixir.CoreTest do
     assert is_map(hooks)
 
     assert Map.get(hooks, "after_create") =~
-             "target_branch=\"${SYMPHONY_TARGET_BRANCH:-main}\""
+             "git clone --depth 1 --branch main \"$SOURCE_REPO_URL\" ."
 
-    assert Map.get(hooks, "after_create") =~
-             "git clone --depth 1 --branch \"$target_branch\" \"$SOURCE_REPO_URL\" ."
+    refute Map.get(hooks, "after_create") =~ "SYMPHONY_TARGET_BRANCH"
 
     assert Map.get(hooks, "after_create") =~ "[ -d elixir ] && [ -f elixir/mix.exs ]"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
@@ -130,6 +129,13 @@ defmodule SymphonyElixir.CoreTest do
              "[ -d elixir ] && [ -f elixir/mix.exs ]"
 
     assert Map.get(hooks, "before_remove") =~ "mix workspace.before_remove"
+
+    agents = Map.get(config, "agents", %{})
+    assert get_in(agents, ["cursor", "command"]) == "cursor-symphony-bridge"
+
+    routing = Map.get(config, "routing", %{})
+    assert Map.get(routing, "default_agent") == "codex"
+    assert get_in(routing, ["by_label", "agent:claude"]) == "cursor"
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())

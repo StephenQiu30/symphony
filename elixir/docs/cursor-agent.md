@@ -10,16 +10,21 @@ The bridge command is intentionally short and portable:
 cursor-symphony-bridge
 ```
 
-Workflow configs should prefer the env-driven command so other machines do not
-need a hardcoded user path:
+Workflow configs should prefer the stable PATH command installed by
+`mix symphony.install`:
 
 ```yaml
-cursor:
-  command: '"${SYMPHONY_CURSOR_BRIDGE:-cursor-symphony-bridge}"'
-  approval_policy: never
-  thread_sandbox: workspace-write
-  turn_sandbox_policy:
-    type: workspaceWrite
+agents:
+  cursor:
+    command: cursor-symphony-bridge
+    approval_policy: never
+    thread_sandbox: workspace-write
+    turn_sandbox_policy:
+      type: workspaceWrite
+routing:
+  by_label:
+    agent:cursor: cursor
+    agent:claude: cursor
 ```
 
 ## Install The Bridge
@@ -37,12 +42,8 @@ This creates or updates symlinks such as:
 ~/.local/bin/cursor-symphony-bridge -> <symphony checkout>/scripts/cursor-symphony-bridge
 ```
 
-Using the symlink keeps `WORKFLOW.md` portable across machines. A local `.env`
-may still override the command path:
-
-```env
-SYMPHONY_CURSOR_BRIDGE=/path/to/symphony/scripts/cursor-symphony-bridge
-```
+Using the symlink keeps `WORKFLOW.md` portable across machines without a
+machine-specific command path.
 
 ## Authentication Modes
 
@@ -64,7 +65,9 @@ For CI or non-interactive machines, use an API key:
 CURSOR_API_KEY=...
 ```
 
-To prevent accidental use of the wrong local account, set:
+To prevent accidental use of the wrong local account, set
+`SYMPHONY_CURSOR_EXPECTED_ACCOUNT` in the shell or a machine-local secret file
+such as `~/.config/symphony/cursor.env`:
 
 ```env
 SYMPHONY_CURSOR_EXPECTED_ACCOUNT=you@example.com

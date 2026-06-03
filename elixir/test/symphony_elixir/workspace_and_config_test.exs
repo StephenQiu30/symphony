@@ -85,7 +85,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert File.read!(Path.join(second_workspace, "README.md")) == "changed\n"
       assert File.read!(Path.join(second_workspace, "local-progress.txt")) == "in progress\n"
       assert File.read!(Path.join([second_workspace, "deps", "cache.txt"])) == "cached deps\n"
-      assert File.read!(Path.join([second_workspace, "_build", "artifact.txt"])) == "compiled artifact\n"
+
+      assert File.read!(Path.join([second_workspace, "_build", "artifact.txt"])) ==
+               "compiled artifact\n"
+
       assert File.read!(Path.join([second_workspace, "tmp", "scratch.txt"])) == "remove me\n"
     after
       File.rm_rf(workspace_root)
@@ -134,9 +137,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       write_workflow_file!(Workflow.workflow_file_path(), workspace_root: workspace_root)
 
       assert {:ok, canonical_outside_root} = SymphonyElixir.PathSafety.canonicalize(outside_root)
-      assert {:ok, canonical_workspace_root} = SymphonyElixir.PathSafety.canonicalize(workspace_root)
 
-      assert {:error, {:workspace_outside_root, ^canonical_outside_root, ^canonical_workspace_root}} =
+      assert {:ok, canonical_workspace_root} =
+               SymphonyElixir.PathSafety.canonicalize(workspace_root)
+
+      assert {:error,
+              {:workspace_outside_root, ^canonical_outside_root, ^canonical_workspace_root}} =
                Workspace.create_for_issue("MT-SYM")
     after
       File.rm_rf(test_root)
@@ -184,7 +190,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, canonical_workspace_root} =
                SymphonyElixir.PathSafety.canonicalize(workspace_root)
 
-      assert {:error, {:workspace_equals_root, ^canonical_workspace_root, ^canonical_workspace_root}, ""} =
+      assert {:error,
+              {:workspace_equals_root, ^canonical_workspace_root, ^canonical_workspace_root}, ""} =
                Workspace.remove(workspace_root)
     after
       File.rm_rf(workspace_root)
@@ -262,7 +269,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     try do
       target_workspace = Path.join(workspace_root, "S_1")
-      untouched_workspace = Path.join(workspace_root, "OTHER-#{System.unique_integer([:positive])}")
+
+      untouched_workspace =
+        Path.join(workspace_root, "OTHER-#{System.unique_integer([:positive])}")
 
       File.mkdir_p!(target_workspace)
       File.mkdir_p!(untouched_workspace)
@@ -423,10 +432,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Enum.map(issues, & &1.id) == issue_ids
 
-    assert_receive {:fetch_issue_states_page, query, %{ids: ^first_batch_ids, first: 50, relationFirst: 50}}
+    assert_receive {:fetch_issue_states_page, query,
+                    %{ids: ^first_batch_ids, first: 50, relationFirst: 50}}
+
     assert query =~ "SymphonyLinearIssuesById"
 
-    assert_receive {:fetch_issue_states_page, ^query, %{ids: ^second_batch_ids, first: 5, relationFirst: 50}}
+    assert_receive {:fetch_issue_states_page, ^query,
+                    %{ids: ^second_batch_ids, first: 5, relationFirst: 50}}
   end
 
   test "linear client logs response bodies for non-200 graphql responses" do
@@ -581,7 +593,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              Orchestrator.revalidate_issue_for_dispatch_for_test(stale_issue, fetcher)
 
     assert skipped_issue.identifier == "MT-1005"
-    assert skipped_issue.blocked_by == [%{id: "blocker-3", identifier: "MT-1006", state: "In Progress"}]
+
+    assert skipped_issue.blocked_by == [
+             %{id: "blocker-3", identifier: "MT-1006", state: "In Progress"}
+           ]
   end
 
   test "workspace remove returns error information for missing directory" do
@@ -610,7 +625,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        hook_after_create: "echo after_create > after_create.log\necho call >> \"#{after_create_counter}\"",
+        hook_after_create:
+          "echo after_create > after_create.log\necho call >> \"#{after_create_counter}\"",
         hook_before_remove: "echo before_remove > \"#{before_remove_marker}\""
       )
 
@@ -1016,6 +1032,53 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert :ok = Config.validate!()
   end
 
+  test "schema accepts wildmaker style agents and routing configuration" do
+    workflow = """
+    ---
+    tracker:
+      kind: memory
+    agent:
+      max_concurrent_agents: 1
+      max_turns: 20
+    agents:
+      codex:
+        command: "codex app-server"
+        approval_policy: never
+        thread_sandbox: danger-full-access
+      cursor:
+        command: cursor-symphony-bridge
+        approval_policy: never
+        thread_sandbox: danger-full-access
+    routing:
+      default_agent: codex
+      by_label:
+        agent:claude: cursor
+        agent:cursor: cursor
+        agent:codex: codex
+    ---
+    Wildmaker-style prompt body.
+    """
+
+    File.write!(Workflow.workflow_file_path(), workflow)
+    WorkflowStore.force_reload()
+
+    config = Config.settings!()
+    assert config.agent.default_runtime == "codex"
+    assert config.cursor.command == "cursor-symphony-bridge"
+    assert config.cursor.thread_sandbox == "danger-full-access"
+
+    assert config.agent.runtime_by_label == %{
+             "agent:claude" => "cursor",
+             "agent:cursor" => "cursor",
+             "agent:codex" => "codex"
+           }
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :cursor
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:cursor"]}) == :cursor
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:codex"]}) == :codex
+    assert :ok = Config.validate!()
+  end
+
   test "schema selects agent runtime from issue labels" do
     workflow = """
     ---
@@ -1024,7 +1087,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     agent:
       default_runtime: codex
       runtime_by_label:
-        agent:claude: claude
+        agent:claude: cursor
         agent:cursor: cursor
         agent:codex: codex
     ---
@@ -1038,15 +1101,21 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.agent.default_runtime == "codex"
 
     assert config.agent.runtime_by_label == %{
-             "agent:claude" => "claude",
+             "agent:claude" => "cursor",
              "agent:cursor" => "cursor",
              "agent:codex" => "codex"
            }
 
     assert Config.agent_runtime() == :codex
-    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["Agent:Claude"]}) == :claude
-    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: [" agent:cursor "]}) == :cursor
-    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:codex", "agent:claude"]}) == :codex
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["Agent:Claude"]}) == :cursor
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: [" agent:cursor "]}) ==
+             :cursor
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
+             labels: ["agent:codex", "agent:claude"]
+           }) == :codex
+
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["area:server"]}) == :codex
     assert :ok = Config.validate!()
   end
@@ -1319,7 +1388,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       read_only_settings = %{
         settings
-        | codex: %{settings.codex | turn_sandbox_policy: %{"type" => "readOnly", "networkAccess" => true}}
+        | codex: %{
+            settings.codex
+            | turn_sandbox_policy: %{"type" => "readOnly", "networkAccess" => true}
+          }
       }
 
       assert {:ok, %{"type" => "readOnly", "networkAccess" => true}} =
@@ -1327,7 +1399,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       future_settings = %{
         settings
-        | codex: %{settings.codex | turn_sandbox_policy: %{"type" => "futureSandbox", "nested" => %{"flag" => true}}}
+        | codex: %{
+            settings.codex
+            | turn_sandbox_policy: %{"type" => "futureSandbox", "nested" => %{"flag" => true}}
+          }
       }
 
       assert {:ok, %{"type" => "futureSandbox", "nested" => %{"flag" => true}}} =

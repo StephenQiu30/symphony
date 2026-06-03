@@ -252,7 +252,7 @@ defmodule SymphonyElixir.Config.Schema do
 
     @primary_key false
     embedded_schema do
-      field(:command, :string, default: "cursor-agent -p --force --sandbox disabled")
+      field(:command, :string, default: "cursor-symphony-bridge")
       field(:approval_policy, StringOrMap, default: "never")
       field(:thread_sandbox, :string, default: "danger-full-access")
       field(:turn_sandbox_policy, :map)
@@ -367,6 +367,7 @@ defmodule SymphonyElixir.Config.Schema do
     config
     |> normalize_keys()
     |> drop_nil_values()
+    |> normalize_modern_agent_config()
     |> changeset()
     |> apply_action(:validate)
     |> case do
@@ -567,6 +568,47 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp normalize_keys(value) when is_list(value), do: Enum.map(value, &normalize_keys/1)
   defp normalize_keys(value), do: value
+
+  defp normalize_modern_agent_config(config) when is_map(config) do
+    config
+    |> merge_agents_section()
+    |> merge_routing_section()
+  end
+
+  defp merge_agents_section(%{"agents" => agents} = config) when is_map(agents) do
+    Enum.reduce(["codex", "claude", "cursor"], config, fn runtime, acc ->
+      case Map.get(agents, runtime) do
+        agent_config when is_map(agent_config) -> Map.put_new(acc, runtime, agent_config)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp merge_agents_section(config), do: config
+
+  defp merge_routing_section(%{"routing" => routing} = config) when is_map(routing) do
+    existing_agent = Map.get(config, "agent", %{})
+    agent = if is_map(existing_agent), do: existing_agent, else: %{}
+
+    agent =
+      case Map.get(routing, "default_agent") do
+        default_agent when is_binary(default_agent) ->
+          Map.put_new(agent, "default_runtime", default_agent)
+
+        _ ->
+          agent
+      end
+
+    agent =
+      case Map.get(routing, "by_label") do
+        by_label when is_map(by_label) -> Map.put_new(agent, "runtime_by_label", by_label)
+        _ -> agent
+      end
+
+    Map.put(config, "agent", agent)
+  end
+
+  defp merge_routing_section(config), do: config
 
   defp normalize_optional_map(nil), do: nil
   defp normalize_optional_map(value) when is_map(value), do: normalize_keys(value)

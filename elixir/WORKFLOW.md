@@ -22,8 +22,7 @@ workspace:
 hooks:
   timeout_ms: 300000
   after_create: |
-    target_branch="${SYMPHONY_TARGET_BRANCH:-main}"
-    git clone --depth 1 --branch "$target_branch" "$SOURCE_REPO_URL" .
+    git clone --depth 1 --branch main "$SOURCE_REPO_URL" .
     if [ -d elixir ] && [ -f elixir/mix.exs ] && command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
     elif [ -f mix.exs ] && command -v mise >/dev/null 2>&1; then
@@ -34,27 +33,27 @@ hooks:
       cd elixir && mise exec -- mix workspace.before_remove
     fi
 agent:
-  default_runtime: codex
   max_concurrent_agents: 1
   max_turns: 20
-  runtime_by_label:
+agents:
+  codex:
+    command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+    approval_policy: never
+    thread_sandbox: workspace-write
+    turn_sandbox_policy:
+      type: workspaceWrite
+  cursor:
+    command: cursor-symphony-bridge
+    approval_policy: never
+    thread_sandbox: workspace-write
+    turn_sandbox_policy:
+      type: workspaceWrite
+routing:
+  default_agent: codex
+  by_label:
     agent:codex: codex
     agent:claude: cursor
     agent:cursor: cursor
-codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
-  approval_policy: never
-  thread_sandbox: workspace-write
-  turn_sandbox_policy:
-    type: workspaceWrite
-claude:
-  command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
-cursor:
-  command: '"${SYMPHONY_CURSOR_BRIDGE:-cursor-symphony-bridge}"'
-  approval_policy: never
-  thread_sandbox: workspace-write
-  turn_sandbox_policy:
-    type: workspaceWrite
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -94,7 +93,7 @@ Repository and branch guardrails:
 
 - Before creating commits or a PR, verify the current repository matches the configured source repository:
   - `git remote get-url origin` must point to the same GitHub owner/name as `$SOURCE_REPO_URL`.
-  - The PR base must be `${SYMPHONY_BASE_BRANCH:-main}`.
+  - The PR base must be `main`.
   - If the repository does not match, do not create a branch, commit, push, or PR. Record the mismatch in the workpad and stop as blocked.
 - Branch names must be ASCII only. Do not use Linear `gitBranchName` verbatim when it contains non-ASCII characters.
 - Use an agent-scoped branch prefix:

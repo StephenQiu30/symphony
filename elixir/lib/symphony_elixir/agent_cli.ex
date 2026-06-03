@@ -18,7 +18,9 @@ defmodule SymphonyElixir.AgentCli do
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
     metadata = %{cli_agent_runtime: to_string(runtime), cli_agent_session_id: session_id}
 
-    Logger.info("#{runtime} CLI session started for #{issue_context(issue)} session_id=#{session_id}")
+    Logger.info(
+      "#{runtime} CLI session started for #{issue_context(issue)} session_id=#{session_id}"
+    )
 
     case start_port(runtime, workspace, prompt, worker_host) do
       {:ok, port} ->
@@ -102,7 +104,10 @@ defmodule SymphonyElixir.AgentCli do
   defp headless_command(:claude, command) when is_binary(command) do
     command
     |> ensure_flag(~r/(^|\s)(-p|--print)(\s|$)/, "-p")
-    |> ensure_flag(~r/(^|\s)--dangerously-skip-permissions(\s|$)/, "--dangerously-skip-permissions")
+    |> ensure_flag(
+      ~r/(^|\s)--dangerously-skip-permissions(\s|$)/,
+      "--dangerously-skip-permissions"
+    )
     |> ensure_claude_streaming_output()
     |> ensure_flag(~r/(^|\s)--verbose(\s|$)/, "--verbose")
   end
@@ -128,7 +133,11 @@ defmodule SymphonyElixir.AgentCli do
   defp ensure_claude_streaming_output(command) when is_binary(command) do
     cond do
       Regex.match?(~r/(^|\s)--output-format[=\s]stream-json(\s|$)/, command) ->
-        ensure_flag(command, ~r/(^|\s)--include-partial-messages(\s|$)/, "--include-partial-messages")
+        ensure_flag(
+          command,
+          ~r/(^|\s)--include-partial-messages(\s|$)/,
+          "--include-partial-messages"
+        )
 
       Regex.match?(~r/(^|\s)--output-format(\s|=)/, command) ->
         command
@@ -175,7 +184,15 @@ defmodule SymphonyElixir.AgentCli do
         receive_loop(runtime, port, on_message, metadata, timeout_ms, "", state)
 
       {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line <> to_string(chunk), state)
+        receive_loop(
+          runtime,
+          port,
+          on_message,
+          metadata,
+          timeout_ms,
+          pending_line <> to_string(chunk),
+          state
+        )
 
       {^port, {:exit_status, 0}} ->
         state =
@@ -188,11 +205,27 @@ defmodule SymphonyElixir.AgentCli do
         complete_cli_turn(runtime, on_message, metadata, state)
 
       {^port, {:exit_status, status}} ->
+        {pending_line, state} =
+          drain_available_port_output(runtime, port, on_message, metadata, pending_line, state)
+
+        state = flush_pending_cli_line(runtime, on_message, metadata, pending_line, state)
         reason = {:cli_agent_exit, runtime, status}
-        emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: reason}, metadata)
+
+        emit_message(
+          on_message,
+          :turn_ended_with_error,
+          %{session_id: state.session_id, reason: reason},
+          metadata
+        )
+
         {:error, reason}
     after
       timeout_ms ->
+        {pending_line, state} =
+          drain_available_port_output(runtime, port, on_message, metadata, pending_line, state)
+
+        state = flush_pending_cli_line(runtime, on_message, metadata, pending_line, state)
+
         emit_message(
           on_message,
           :turn_ended_with_error,
@@ -201,6 +234,36 @@ defmodule SymphonyElixir.AgentCli do
         )
 
         {:error, :turn_timeout}
+    end
+  end
+
+  defp drain_available_port_output(runtime, port, on_message, metadata, pending_line, state) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        line = pending_line <> to_string(chunk)
+        state = emit_cli_line(runtime, on_message, line, metadata, state)
+        drain_available_port_output(runtime, port, on_message, metadata, "", state)
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        drain_available_port_output(
+          runtime,
+          port,
+          on_message,
+          metadata,
+          pending_line <> to_string(chunk),
+          state
+        )
+    after
+      0 ->
+        {pending_line, state}
+    end
+  end
+
+  defp flush_pending_cli_line(runtime, on_message, metadata, pending_line, state) do
+    if pending_line != "" do
+      emit_cli_line(runtime, on_message, pending_line, metadata, state)
+    else
+      state
     end
   end
 
@@ -227,8 +290,20 @@ defmodule SymphonyElixir.AgentCli do
       |> Map.put_new("subtype", "success")
       |> Map.put("session_id", state.session_id)
 
-    emit_message(on_message, :turn_completed, %{session_id: state.session_id, payload: completion_payload}, metadata)
-    {:ok, %{result: :turn_completed, session_id: state.session_id, thread_id: state.session_id, turn_id: "turn-1"}}
+    emit_message(
+      on_message,
+      :turn_completed,
+      %{session_id: state.session_id, payload: completion_payload},
+      metadata
+    )
+
+    {:ok,
+     %{
+       result: :turn_completed,
+       session_id: state.session_id,
+       thread_id: state.session_id,
+       turn_id: "turn-1"
+     }}
   end
 
   defp emit_message(on_message, event, payload, metadata) do
@@ -240,9 +315,11 @@ defmodule SymphonyElixir.AgentCli do
     on_message.(message)
   end
 
-  defp emit_cli_line(runtime, on_message, line, metadata, state) when runtime in [:claude, :cursor] do
+  defp emit_cli_line(runtime, on_message, line, metadata, state)
+       when runtime in [:claude, :cursor] do
     case Jason.decode(line) do
       {:ok, payload} ->
+        maybe_emit_cursor_runtime_authenticated(runtime, on_message, payload, metadata)
         emit_message(on_message, :notification, %{payload: payload, raw: line}, metadata)
         update_cli_state_from_payload(state, payload)
 
@@ -257,6 +334,37 @@ defmodule SymphonyElixir.AgentCli do
     state
   end
 
+  defp maybe_emit_cursor_runtime_authenticated(:cursor, on_message, payload, metadata)
+       when is_map(payload) do
+    with "system" <- map_value(payload, ["type", :type]),
+         "init" <- map_value(payload, ["subtype", :subtype]),
+         api_key_source when is_binary(api_key_source) <-
+           map_value(payload, ["apiKeySource", :apiKeySource]) do
+      auth_payload =
+        %{"apiKeySource" => api_key_source}
+        |> put_optional("session_id", map_value(payload, ["session_id", :session_id]))
+        |> put_optional("model", map_value(payload, ["model", :model]))
+        |> put_optional("permissionMode", map_value(payload, ["permissionMode", :permissionMode]))
+        |> put_optional("cwd", map_value(payload, ["cwd", :cwd]))
+
+      emit_message(
+        on_message,
+        :runtime_authenticated,
+        %{session_id: Map.get(auth_payload, "session_id"), payload: auth_payload},
+        metadata
+      )
+    else
+      _ -> :ok
+    end
+  end
+
+  defp maybe_emit_cursor_runtime_authenticated(_runtime, _on_message, _payload, _metadata),
+    do: :ok
+
+  defp put_optional(map, _key, nil), do: map
+  defp put_optional(map, _key, ""), do: map
+  defp put_optional(map, key, value), do: Map.put(map, key, value)
+
   defp update_cli_state_from_payload(state, %{} = payload) do
     state
     |> maybe_update_cli_session_id(payload)
@@ -265,8 +373,11 @@ defmodule SymphonyElixir.AgentCli do
 
   defp maybe_update_cli_session_id(state, payload) do
     case map_value(payload, ["session_id", :session_id]) do
-      session_id when is_binary(session_id) and session_id != "" -> %{state | session_id: session_id}
-      _ -> state
+      session_id when is_binary(session_id) and session_id != "" ->
+        %{state | session_id: session_id}
+
+      _ ->
+        state
     end
   end
 

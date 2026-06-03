@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# Optional machine-local secret file. Keep it outside git.
+# Example content: export CURSOR_API_KEY=...
+if [ -f "$HOME/.config/symphony/cursor.env" ]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.config/symphony/cursor.env"
+fi
+
+if ! command -v cursor-agent >/dev/null 2>&1; then
+  echo "cursor-symphony-bridge: cursor-agent not found on PATH" >&2
+  exit 127
+fi
+
+if [ -n "${SYMPHONY_CURSOR_EXPECTED_ACCOUNT:-}" ]; then
+  status_output="$(cursor-agent status 2>&1 || true)"
+  if ! printf '%s\n' "$status_output" | grep -F "Logged in as ${SYMPHONY_CURSOR_EXPECTED_ACCOUNT}" >/dev/null; then
+    echo "cursor-symphony-bridge: cursor-agent is not logged in as ${SYMPHONY_CURSOR_EXPECTED_ACCOUNT}" >&2
+    echo "$status_output" >&2
+    exit 1
+  fi
+fi
+
+exec cursor-agent "$@"

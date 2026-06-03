@@ -14,7 +14,15 @@ defmodule SymphonyElixir.CoreTest do
     config = Config.settings!()
     assert config.polling.interval_ms == 30_000
     assert config.tracker.active_states == ["Todo", "In Progress"]
-    assert config.tracker.terminal_states == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+
+    assert config.tracker.terminal_states == [
+             "Closed",
+             "Cancelled",
+             "Canceled",
+             "Duplicate",
+             "Done"
+           ]
+
     assert config.tracker.assignee == nil
     assert config.agent.max_turns == 20
 
@@ -64,7 +72,10 @@ defmodule SymphonyElixir.CoreTest do
     write_workflow_file!(Workflow.workflow_file_path(), codex_command: "/bin/sh app-server")
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: "definitely-not-valid")
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_approval_policy: "definitely-not-valid"
+    )
+
     assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: "unsafe-ish")
@@ -105,10 +116,20 @@ defmodule SymphonyElixir.CoreTest do
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 \"$SOURCE_REPO_URL\" ."
-    assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
+
+    assert Map.get(hooks, "after_create") =~
+             "target_branch=\"${SYMPHONY_TARGET_BRANCH:-main}\""
+
+    assert Map.get(hooks, "after_create") =~
+             "git clone --depth 1 --branch \"$target_branch\" \"$SOURCE_REPO_URL\" ."
+
+    assert Map.get(hooks, "after_create") =~ "[ -d elixir ] && [ -f elixir/mix.exs ]"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
-    assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
+
+    assert Map.get(hooks, "before_remove") =~
+             "[ -d elixir ] && [ -f elixir/mix.exs ]"
+
+    assert Map.get(hooks, "before_remove") =~ "mix workspace.before_remove"
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -271,7 +292,9 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "workflow load accepts prompt-only files without front matter" do
-    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "PROMPT_ONLY_WORKFLOW.md")
+    workflow_path =
+      Path.join(Path.dirname(Workflow.workflow_file_path()), "PROMPT_ONLY_WORKFLOW.md")
+
     File.write!(workflow_path, "Prompt only\n")
 
     assert {:ok, %{config: %{}, prompt: "Prompt only", prompt_template: "Prompt only"}} =
@@ -279,15 +302,20 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "workflow load accepts unterminated front matter with an empty prompt" do
-    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "UNTERMINATED_WORKFLOW.md")
+    workflow_path =
+      Path.join(Path.dirname(Workflow.workflow_file_path()), "UNTERMINATED_WORKFLOW.md")
+
     File.write!(workflow_path, "---\ntracker:\n  kind: linear\n")
 
-    assert {:ok, %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
+    assert {:ok,
+            %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
              Workflow.load(workflow_path)
   end
 
   test "workflow load rejects non-map front matter" do
-    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "INVALID_FRONT_MATTER_WORKFLOW.md")
+    workflow_path =
+      Path.join(Path.dirname(Workflow.workflow_file_path()), "INVALID_FRONT_MATTER_WORKFLOW.md")
+
     File.write!(workflow_path, "---\n- not-a-map\n---\nPrompt body\n")
 
     assert {:error, :workflow_front_matter_not_a_map} = Workflow.load(workflow_path)
@@ -308,7 +336,8 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     if is_pid(orchestrator_pid) do
-      assert :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.Orchestrator)
+      assert :ok =
+               Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.Orchestrator)
     end
 
     assert {:ok, pid} = SymphonyElixir.start_link()
@@ -797,7 +826,9 @@ defmodule SymphonyElixir.CoreTest do
              Orchestrator.handle_call(:request_refresh, {self(), make_ref()}, refreshed_state)
 
     assert coalesced_state.tick_token == refreshed_state.tick_token
-    assert {:noreply, ^coalesced_state} = Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
+
+    assert {:noreply, ^coalesced_state} =
+             Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
   end
 
   test "select_worker_host_for_test skips full ssh hosts under the shared per-host cap" do
@@ -885,7 +916,8 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "prompt builder renders issue datetime fields without crashing" do
-    workflow_prompt = "Ticket {{ issue.identifier }} created={{ issue.created_at }} updated={{ issue.updated_at }}"
+    workflow_prompt =
+      "Ticket {{ issue.identifier }} created={{ issue.created_at }} updated={{ issue.updated_at }}"
 
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
 
@@ -1022,9 +1054,12 @@ defmodule SymphonyElixir.CoreTest do
       end
     end)
 
-    assert :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+    assert :ok =
+             Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
 
-    Workflow.set_workflow_file_path(Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md"))
+    Workflow.set_workflow_file_path(
+      Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md")
+    )
 
     issue = %Issue{
       identifier: "MT-780",
@@ -1326,7 +1361,10 @@ defmodule SymphonyElixir.CoreTest do
       assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
 
       trace = File.read!(trace_file)
-      assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-44"))
+
+      assert {:ok, canonical_workspace} =
+               SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-44"))
+
       assert trace =~ "PWD:#{canonical_workspace}"
 
       assert trace =~
@@ -1475,7 +1513,10 @@ defmodule SymphonyElixir.CoreTest do
       assert :ok = AgentRunner.run(issue, nil, issue_state_fetcher: state_fetcher)
 
       trace = File.read!(trace_file)
-      assert {:ok, canonical_workspace} = SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-45"))
+
+      assert {:ok, canonical_workspace} =
+               SymphonyElixir.PathSafety.canonicalize(Path.join(workspace_root, "STE-45"))
+
       assert trace =~ "PWD:#{canonical_workspace}"
 
       assert trace =~
@@ -1806,22 +1847,36 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       assert {:ok, %{result: :turn_completed, session_id: "claude-session-1"}} =
-               SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+               SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue,
+                 on_message: fn message -> send(parent, {:agent_message, message}) end
+               )
 
       assert_receive {:agent_message, %{event: :session_started, codex_app_server_pid: cli_pid}}
       assert is_binary(cli_pid)
       assert cli_pid =~ ~r/^\d+$/
 
-      assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "system", "status" => "requesting"}}}
-      assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "stream_event"}}}
-      assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "result", "result" => "done"}}}
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        payload: %{"type" => "system", "status" => "requesting"}
+                      }}
+
+      assert_receive {:agent_message,
+                      %{event: :notification, payload: %{"type" => "stream_event"}}}
+
+      assert_receive {:agent_message,
+                      %{event: :notification, payload: %{"type" => "result", "result" => "done"}}}
 
       assert_receive {:agent_message,
                       %{
                         event: :turn_completed,
                         session_id: "claude-session-1",
                         payload: %{
-                          "usage" => %{"input_tokens" => 11, "output_tokens" => 3, "total_tokens" => 14}
+                          "usage" => %{
+                            "input_tokens" => 11,
+                            "output_tokens" => 3,
+                            "total_tokens" => 14
+                          }
                         }
                       }}
 
@@ -1876,11 +1931,89 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       assert {:error, {:cli_agent_failed, :claude, %{"result" => "permission denied"}}} =
-               SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+               SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue,
+                 on_message: fn message -> send(parent, {:agent_message, message}) end
+               )
 
-      assert_receive {:agent_message, %{event: :notification, payload: %{"type" => "result", "result" => "permission denied"}}}
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        payload: %{"type" => "result", "result" => "permission denied"}
+                      }}
+
       assert_receive {:agent_message, %{event: :turn_failed, session_id: "claude-session-error"}}
       refute_receive {:agent_message, %{event: :turn_completed}}, 100
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent flushes unterminated usage result before nonzero exit" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-claude-nonzero-usage-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace = Path.join(test_root, "workspace")
+      claude_binary = Path.join(test_root, "fake-claude")
+      File.mkdir_p!(workspace)
+
+      File.write!(claude_binary, """
+      #!/bin/sh
+      cat >/dev/null
+      printf '%s' '{"type":"result","subtype":"error","session_id":"claude-session-error","is_error":true,"result":"rate limit","usage":{"input_tokens":8000,"output_tokens":0,"total_tokens":8000}}'
+      exit 1
+      """)
+
+      File.chmod!(claude_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+      claude:
+        command: "#{claude_binary} -p --dangerously-skip-permissions"
+      ---
+      Stream JSON prompt body.
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-claude-nonzero-usage",
+        identifier: "STE-44",
+        title: "Count Claude usage before nonzero exit",
+        description: "Claude stream-json result usage should be emitted before nonzero exit",
+        state: "In Progress",
+        labels: []
+      }
+
+      assert {:error, {:cli_agent_exit, :claude, 1}} =
+               SymphonyElixir.AgentCli.run(:claude, workspace, "hello", issue,
+                 on_message: fn message -> send(parent, {:agent_message, message}) end
+               )
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        payload: %{
+                          "type" => "result",
+                          "result" => "rate limit",
+                          "usage" => %{
+                            "input_tokens" => 8000,
+                            "output_tokens" => 0,
+                            "total_tokens" => 8000
+                          }
+                        }
+                      }}
+
+      assert_receive {:agent_message,
+                      %{event: :turn_ended_with_error, session_id: "claude-session-error"}}
     after
       File.rm_rf(test_root)
     end
@@ -1903,6 +2036,7 @@ defmodule SymphonyElixir.CoreTest do
       #!/bin/sh
       trace_file="${SYMP_TEST_CURSOR_STREAM_TRACE}"
       printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      printf '%s\\n' '{"type":"system","subtype":"init","apiKeySource":"login","cwd":"#{workspace}","session_id":"cursor-session-1","model":"Auto","permissionMode":"default"}'
       printf '%s\\n' '{"type":"system","subtype":"status","status":"requesting"}'
       printf '%s\\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello"}}}'
       printf '%s\\n' '{"type":"result","subtype":"success","session_id":"cursor-session-1","result":"done","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}'
@@ -1938,11 +2072,49 @@ defmodule SymphonyElixir.CoreTest do
       }
 
       assert {:ok, %{result: :turn_completed, session_id: "cursor-session-1"}} =
-               SymphonyElixir.AgentCli.run(:cursor, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+               SymphonyElixir.AgentCli.run(:cursor, workspace, "hello", issue,
+                 on_message: fn message -> send(parent, {:agent_message, message}) end
+               )
 
-      assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "system", "status" => "requesting"}}}
-      assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "stream_event"}}}
-      assert_receive {:agent_message, %{event: :notification, cli_agent_runtime: "cursor", payload: %{"type" => "result", "result" => "done"}}}
+      assert_receive {:agent_message,
+                      %{
+                        event: :runtime_authenticated,
+                        cli_agent_runtime: "cursor",
+                        session_id: "cursor-session-1",
+                        payload: %{
+                          "apiKeySource" => "login",
+                          "model" => "Auto",
+                          "permissionMode" => "default"
+                        }
+                      }}
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        cli_agent_runtime: "cursor",
+                        payload: %{"type" => "system", "subtype" => "init"}
+                      }}
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        cli_agent_runtime: "cursor",
+                        payload: %{"type" => "system", "status" => "requesting"}
+                      }}
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        cli_agent_runtime: "cursor",
+                        payload: %{"type" => "stream_event"}
+                      }}
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        cli_agent_runtime: "cursor",
+                        payload: %{"type" => "result", "result" => "done"}
+                      }}
 
       assert_receive {:agent_message,
                       %{
@@ -1950,7 +2122,11 @@ defmodule SymphonyElixir.CoreTest do
                         cli_agent_runtime: "cursor",
                         session_id: "cursor-session-1",
                         payload: %{
-                          "usage" => %{"input_tokens" => 10, "output_tokens" => 2, "total_tokens" => 12}
+                          "usage" => %{
+                            "input_tokens" => 10,
+                            "output_tokens" => 2,
+                            "total_tokens" => 12
+                          }
                         }
                       }}
 
@@ -1959,6 +2135,77 @@ defmodule SymphonyElixir.CoreTest do
       assert trace =~ "--stream-partial-output"
       assert trace =~ "--approve-mcps"
       assert [] = Path.wildcard(Path.join(workspace, ".symphony-cursor-prompt.*"))
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent flushes cursor usage result before nonzero exit" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-agent-runner-cursor-nonzero-usage-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace = Path.join(test_root, "workspace")
+      cursor_binary = Path.join(test_root, "fake-cursor-agent")
+      File.mkdir_p!(workspace)
+
+      File.write!(cursor_binary, """
+      #!/bin/sh
+      printf '%s' '{"type":"result","subtype":"error","session_id":"cursor-session-error","is_error":true,"result":"quota exceeded","usage":{"input_tokens":9000,"output_tokens":1,"total_tokens":9001}}'
+      exit 1
+      """)
+
+      File.chmod!(cursor_binary, 0o755)
+
+      workflow = """
+      ---
+      tracker:
+        kind: memory
+      cursor:
+        command: "#{cursor_binary} -p --force --sandbox disabled"
+      ---
+      Stream JSON prompt body.
+      """
+
+      File.write!(Workflow.workflow_file_path(), workflow)
+      WorkflowStore.force_reload()
+
+      parent = self()
+
+      issue = %Issue{
+        id: "issue-cursor-nonzero-usage",
+        identifier: "STE-45",
+        title: "Count Cursor usage before nonzero exit",
+        description: "Cursor stream-json result usage should be emitted before nonzero exit",
+        state: "In Progress",
+        labels: []
+      }
+
+      assert {:error, {:cli_agent_exit, :cursor, 1}} =
+               SymphonyElixir.AgentCli.run(:cursor, workspace, "hello", issue,
+                 on_message: fn message -> send(parent, {:agent_message, message}) end
+               )
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :notification,
+                        cli_agent_runtime: "cursor",
+                        payload: %{
+                          "type" => "result",
+                          "result" => "quota exceeded",
+                          "usage" => %{
+                            "input_tokens" => 9000,
+                            "output_tokens" => 1,
+                            "total_tokens" => 9001
+                          }
+                        }
+                      }}
+
+      assert_receive {:agent_message,
+                      %{event: :turn_ended_with_error, session_id: "cursor-session-error"}}
     after
       File.rm_rf(test_root)
     end

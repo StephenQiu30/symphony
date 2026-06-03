@@ -20,21 +20,26 @@ server:
 workspace:
   root: "$SYMPHONY_WORKSPACE_ROOT"
 hooks:
+  timeout_ms: 300000
   after_create: |
-    target_branch="${SYMPHONY_TARGET_BRANCH:-feature/video-workflow}"
+    target_branch="${SYMPHONY_TARGET_BRANCH:-main}"
     git clone --depth 1 --branch "$target_branch" "$SOURCE_REPO_URL" .
-    if command -v mise >/dev/null 2>&1; then
+    if [ -d elixir ] && [ -f elixir/mix.exs ] && command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
+    elif [ -f mix.exs ] && command -v mise >/dev/null 2>&1; then
+      mise trust && mise exec -- mix deps.get
     fi
   before_remove: |
-    cd elixir && mise exec -- mix workspace.before_remove
+    if [ -d elixir ] && [ -f elixir/mix.exs ] && command -v mise >/dev/null 2>&1; then
+      cd elixir && mise exec -- mix workspace.before_remove
+    fi
 agent:
   default_runtime: codex
-  max_concurrent_agents: 10
+  max_concurrent_agents: 1
   max_turns: 20
   runtime_by_label:
     agent:codex: codex
-    agent:claude: claude
+    agent:claude: cursor
     agent:cursor: cursor
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
@@ -45,7 +50,7 @@ codex:
 claude:
   command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
 cursor:
-  command: cursor-agent -p --force --sandbox disabled
+  command: '"${SYMPHONY_CURSOR_BRIDGE:-cursor-symphony-bridge}"'
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -80,6 +85,18 @@ Instructions:
 3. Final message must report completed actions and blockers only. Do not include "next steps for user".
 
 Work only in the provided repository copy. Do not touch any other path.
+
+Repository and branch guardrails:
+
+- Before creating commits or a PR, verify the current repository matches the configured source repository:
+  - `git remote get-url origin` must point to the same GitHub owner/name as `$SOURCE_REPO_URL`.
+  - The PR base must be `${SYMPHONY_BASE_BRANCH:-main}`.
+  - If the repository does not match, do not create a branch, commit, push, or PR. Record the mismatch in the workpad and stop as blocked.
+- Branch names must be ASCII only. Do not use Linear `gitBranchName` verbatim when it contains non-ASCII characters.
+- Use an agent-scoped branch prefix:
+  - `cursor/<issue-identifier-lowercase>-<short-english-slug>` for `agent:cursor` and legacy `agent:claude` labels.
+  - `codex/<issue-identifier-lowercase>-<short-english-slug>` for `agent:codex`.
+- Commit messages must use the requested conventional style, for example `test: ...`, `impl(cursor): ...`, `feat(...): ...`, `refactor(...): ...`, or `chore: ...`.
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 
@@ -142,14 +159,14 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
    - Create a fresh branch from `origin/main` and restart execution flow as a new attempt.
 5. For `Todo` tickets, do startup sequencing in this exact order:
    - `update_issue(..., state: "In Progress")`
-   - find/create `## Codex Workpad` bootstrap comment
+   - find/create `## Cursor Workpad` bootstrap comment
    - only then begin analysis/planning/implementation work.
 6. Add a short comment if state and issue content are inconsistent, then proceed with the safest flow.
 
 ## Step 1: Start/continue execution (Todo or In Progress)
 
 1.  Find or create a single persistent scratchpad comment for the issue:
-    - Search existing comments for a marker header: `## Codex Workpad`.
+    - Search existing comments for a marker header: `## Cursor Workpad`.
     - Ignore resolved comments while searching; only active/unresolved comments are eligible to be reused as the live workpad.
     - If found, reuse that comment; do not create a new workpad comment.
     - If not found, create one workpad comment and use it for all updates.
@@ -228,7 +245,8 @@ Use this only when completion is blocked by missing required tools or missing au
 6.  Re-check all acceptance criteria and close any gaps.
 7.  Before every `git push` attempt, run the required validation for your scope and confirm it passes; if it fails, address issues and rerun until green, then commit and push changes.
 8.  Attach PR URL to the issue (prefer attachment; use the workpad comment only if attachment is unavailable).
-    - Ensure the GitHub PR has label `symphony` (add it if missing).
+    - Re-check the PR URL before attaching it. It must belong to the configured source repository, not the Symphony orchestration repository unless the configured source repository is Symphony.
+    - Add only repository-appropriate PR labels. Do not add the `symphony` label outside the Symphony repository.
 9.  Merge latest `origin/main` into branch, resolve conflicts, and rerun checks.
 10. Update the workpad comment with final checklist status and validation notes.
     - Mark completed plan/acceptance/validation checklist items as checked.
@@ -264,11 +282,11 @@ Use this only when completion is blocked by missing required tools or missing au
 1. Treat `Rework` as a full approach reset, not incremental patching.
 2. Re-read the full issue body and all human comments; explicitly identify what will be done differently this attempt.
 3. Close the existing PR tied to the issue.
-4. Remove the existing `## Codex Workpad` comment from the issue.
+4. Remove the existing `## Cursor Workpad` comment from the issue.
 5. Create a fresh branch from `origin/main`.
 6. Start over from the normal kickoff flow:
    - If current issue state is `Todo`, move it to `In Progress`; otherwise keep the current state.
-   - Create a new bootstrap `## Codex Workpad` comment.
+   - Create a new bootstrap `## Cursor Workpad` comment.
    - Build a fresh plan/checklist and execute end-to-end.
 
 ## Completion bar before Human Review
@@ -287,7 +305,7 @@ Use this only when completion is blocked by missing required tools or missing au
 - For closed/merged branch PRs, create a new branch from `origin/main` and restart from reproduction/planning as if starting fresh.
 - If issue state is `Backlog`, do not modify it; wait for human to move to `Todo`.
 - Do not edit the issue body/description for planning or progress tracking.
-- Use exactly one persistent workpad comment (`## Codex Workpad`) per issue.
+- Use exactly one persistent workpad comment (`## Cursor Workpad`) per issue.
 - If comment editing is unavailable in-session, use the update script. Only report blocked if both MCP editing and script-based editing are unavailable.
 - Temporary proof edits are allowed only for local verification and must be reverted before commit.
 - If out-of-scope improvements are found, create a separate Backlog issue rather
@@ -306,7 +324,7 @@ Use this only when completion is blocked by missing required tools or missing au
 Use this exact structure for the persistent workpad comment and keep it updated in place throughout execution:
 
 ````md
-## Codex Workpad
+## Cursor Workpad
 
 ```text
 <hostname>:<abs-path>@<short-sha>

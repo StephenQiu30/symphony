@@ -48,9 +48,13 @@ machine-specific command path.
 ## Authentication Modes
 
 Cursor Agent supports both local login and API-key authentication. The bridge
-does not hardcode an account and does not assume `popcornqhd@gmail.com`; it uses
-the active Cursor CLI login on the current machine unless `CURSOR_API_KEY` is
-set.
+does not hardcode an account and does not assume `popcornqhd@gmail.com`.
+
+Authentication precedence:
+
+1. Non-empty `CURSOR_API_KEY` from the shell or project `.env`
+2. Non-empty `CURSOR_API_KEY` from `~/.config/symphony/cursor.env`
+3. The active Cursor CLI login on the current machine
 
 For a developer machine, prefer the Cursor login stored by the CLI:
 
@@ -64,6 +68,9 @@ For CI or non-interactive machines, use an API key:
 ```env
 CURSOR_API_KEY=...
 ```
+
+It is safe to leave `CURSOR_API_KEY=` blank in the project `.env`; the bridge
+will still fall back to the global machine-local config file.
 
 To prevent accidental use of the wrong local account, set
 `SYMPHONY_CURSOR_EXPECTED_ACCOUNT` in the shell or a machine-local secret file

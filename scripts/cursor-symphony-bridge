@@ -65,8 +65,8 @@ def load_machine_env() -> None:
             key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip().strip("'\"")
-            if key:
-                os.environ.setdefault(key, value)
+            if key and not os.environ.get(key, "").strip():
+                os.environ[key] = value
 
 
 def find_cursor_binary(explicit_binary: str | None = None) -> str:

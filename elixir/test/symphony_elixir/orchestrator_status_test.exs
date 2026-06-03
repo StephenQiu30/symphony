@@ -199,6 +199,75 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     assert is_integer(completed_state.codex_totals.seconds_running)
   end
 
+  test "orchestrator applies worker updates that arrive before running entry exists" do
+    issue_id = "issue-early-cli-pid"
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: "STE-152",
+      title: "Early CLI PID",
+      description: "CLI runtime reports pid before running entry is visible",
+      state: "Todo",
+      url: "https://example.org/issues/STE-152"
+    }
+
+    orchestrator_name = Module.concat(__MODULE__, :EarlyCliPidOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    now = DateTime.utc_now()
+
+    send(
+      pid,
+      {:codex_worker_update, issue_id,
+       %{
+         event: :session_started,
+         session_id: "claude-early",
+         timestamp: now,
+         codex_app_server_pid: "60971"
+       }}
+    )
+
+    Process.sleep(50)
+
+    running_entry = %{
+      pid: self(),
+      ref: make_ref(),
+      identifier: issue.identifier,
+      issue: issue,
+      session_id: nil,
+      turn_count: 0,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_app_server_pid: nil,
+      codex_input_tokens: 0,
+      codex_output_tokens: 0,
+      codex_total_tokens: 0,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      started_at: DateTime.utc_now()
+    }
+
+    :sys.replace_state(pid, fn state ->
+      state
+      |> Map.put(:running, %{issue_id => running_entry})
+      |> Map.put(:claimed, MapSet.put(state.claimed, issue_id))
+    end)
+
+    snapshot = GenServer.call(pid, :snapshot)
+    assert %{running: [snapshot_entry]} = snapshot
+    assert snapshot_entry.codex_app_server_pid == "60971"
+    assert snapshot_entry.session_id == "claude-early"
+    assert snapshot_entry.last_codex_event == :session_started
+  end
+
   test "orchestrator snapshot tracks turn completed usage when present" do
     issue_id = "issue-turn-completed-usage"
 

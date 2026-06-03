@@ -235,45 +235,6 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  defmodule Cursor do
-    @moduledoc false
-    use Ecto.Schema
-    import Ecto.Changeset
-
-    @primary_key false
-    embedded_schema do
-      field(:command, :string, default: "cursor-symphony-bridge")
-      field(:approval_policy, StringOrMap, default: "never")
-      field(:thread_sandbox, :string, default: "danger-full-access")
-      field(:turn_sandbox_policy, :map)
-      field(:prompt_mode, :string, default: "argument")
-      field(:turn_timeout_ms, :integer, default: 3_600_000)
-      field(:read_timeout_ms, :integer, default: 5_000)
-    end
-
-    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
-    def changeset(schema, attrs) do
-      schema
-      |> cast(
-        attrs,
-        [
-          :command,
-          :approval_policy,
-          :thread_sandbox,
-          :turn_sandbox_policy,
-          :prompt_mode,
-          :turn_timeout_ms,
-          :read_timeout_ms
-        ],
-        empty_values: []
-      )
-      |> validate_required([:command])
-      |> validate_inclusion(:prompt_mode, ["stdin", "argument"])
-      |> validate_number(:turn_timeout_ms, greater_than: 0)
-      |> validate_number(:read_timeout_ms, greater_than: 0)
-    end
-  end
-
   defmodule Hooks do
     @moduledoc false
     use Ecto.Schema
@@ -344,7 +305,7 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:agent, Agent, on_replace: :update, defaults_to_struct: true)
     embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
     embeds_one(:claude, CliRuntime, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:cursor, Cursor, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:cursor, CliRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:gemini, CliRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
@@ -385,20 +346,6 @@ defmodule SymphonyElixir.Config.Schema do
           {:ok, map()} | {:error, term()}
   def resolve_runtime_turn_sandbox_policy(settings, workspace \\ nil, opts \\ []) do
     case settings.codex.turn_sandbox_policy do
-      %{} = policy ->
-        {:ok, policy}
-
-      _ ->
-        workspace
-        |> default_workspace_root(settings.workspace.root)
-        |> default_runtime_turn_sandbox_policy(opts)
-    end
-  end
-
-  @spec resolve_agent_turn_sandbox_policy(map(), %__MODULE__{}, Path.t() | nil, keyword()) ::
-          {:ok, map()} | {:error, term()}
-  def resolve_agent_turn_sandbox_policy(agent_settings, settings, workspace \\ nil, opts \\ []) do
-    case Map.get(agent_settings, :turn_sandbox_policy) do
       %{} = policy ->
         {:ok, policy}
 
@@ -486,7 +433,7 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:agent, with: &Agent.changeset/2)
     |> cast_embed(:codex, with: &Codex.changeset/2)
     |> cast_embed(:claude, with: &CliRuntime.changeset/2)
-    |> cast_embed(:cursor, with: &Cursor.changeset/2)
+    |> cast_embed(:cursor, with: &CliRuntime.changeset/2)
     |> cast_embed(:gemini, with: &CliRuntime.changeset/2)
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
@@ -512,15 +459,9 @@ defmodule SymphonyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    cursor = %{
-      settings.cursor
-      | approval_policy: normalize_keys(settings.cursor.approval_policy),
-        turn_sandbox_policy: normalize_optional_map(settings.cursor.turn_sandbox_policy)
-    }
-
     server = %{settings.server | host: resolve_plain_setting(settings.server.host, System.get_env("SYMPHONY_SERVER_HOST") || "0.0.0.0")}
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex, cursor: cursor, server: server}
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, server: server}
   end
 
   defp normalize_keys(value) when is_map(value) do

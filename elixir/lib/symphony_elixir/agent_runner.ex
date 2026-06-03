@@ -78,22 +78,22 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     case Config.agent_runtime(issue) do
-      runtime when runtime in [:claude, :gemini] ->
+      runtime when runtime in [:claude, :cursor, :gemini] ->
         run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
 
-      runtime when runtime in [:codex, :cursor] ->
-        run_app_server_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
+      :codex ->
+        run_app_server_agent_turns(:codex, workspace, issue, codex_update_recipient, opts, worker_host)
     end
   end
 
-  defp run_app_server_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host) do
+  defp run_app_server_agent_turns(:codex, workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
 
-    with {:ok, session} <- AppServer.start_session(workspace, runtime: runtime, worker_host: worker_host) do
+    with {:ok, session} <- AppServer.start_session(workspace, runtime: :codex, worker_host: worker_host) do
       try do
         do_run_app_server_agent_turns(
-          runtime,
+          :codex,
           session,
           workspace,
           issue,

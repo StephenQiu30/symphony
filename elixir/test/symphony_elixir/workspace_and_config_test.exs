@@ -984,7 +984,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     claude:
       command: claude
     cursor:
-      command: cursor-symphony-bridge
+      command: cursor-agent
     gemini:
       command: gemini
     ---

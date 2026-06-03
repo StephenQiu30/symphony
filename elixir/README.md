@@ -15,10 +15,10 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 1. Polls Linear for candidate work
 2. Creates a workspace per issue
-3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
-   workspace
-4. Sends a workflow prompt to Codex
-5. Keeps Codex working on the issue until the work is done
+3. Selects an agent runtime from Linear labels (`agent:codex`, `agent:claude`, `agent:cursor`,
+   `agent:gemini`) or falls back to `agent.default_runtime` in `WORKFLOW.md`
+4. Runs the matching runtime in the workspace (Codex app-server, or Claude/Cursor/Gemini CLI)
+5. Sends the rendered workflow prompt and keeps the agent working until the issue is done or blocked
 
 During app-server sessions, Symphony also serves a client-side `linear_graphql` tool so that repo
 skills can make raw Linear GraphQL calls.

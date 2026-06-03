@@ -104,8 +104,9 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec cli_agent_settings(:claude | :gemini) :: map()
+  @spec cli_agent_settings(:claude | :cursor | :gemini) :: map()
   def cli_agent_settings(:claude), do: settings!().claude
+  def cli_agent_settings(:cursor), do: settings!().cursor
   def cli_agent_settings(:gemini), do: settings!().gemini
 
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
@@ -151,11 +152,9 @@ defmodule SymphonyElixir.Config do
     agent_app_server_settings(:codex, workspace, opts)
   end
 
-  @spec agent_app_server_settings(:codex | :cursor, Path.t() | nil, keyword()) ::
+  @spec agent_app_server_settings(:codex, Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
-  def agent_app_server_settings(runtime, workspace \\ nil, opts \\ [])
-
-  def agent_app_server_settings(:codex, workspace, opts) do
+  def agent_app_server_settings(:codex, workspace \\ nil, opts \\ []) do
     with {:ok, settings} <- settings() do
       with {:ok, turn_sandbox_policy} <-
              Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts) do
@@ -163,20 +162,6 @@ defmodule SymphonyElixir.Config do
          %{
            approval_policy: settings.codex.approval_policy,
            thread_sandbox: settings.codex.thread_sandbox,
-           turn_sandbox_policy: turn_sandbox_policy
-         }}
-      end
-    end
-  end
-
-  def agent_app_server_settings(:cursor, workspace, opts) do
-    with {:ok, settings} <- settings() do
-      with {:ok, turn_sandbox_policy} <-
-             Schema.resolve_agent_turn_sandbox_policy(settings.cursor, settings, workspace, opts) do
-        {:ok,
-         %{
-           approval_policy: settings.cursor.approval_policy,
-           thread_sandbox: settings.cursor.thread_sandbox,
            turn_sandbox_policy: turn_sandbox_policy
          }}
       end

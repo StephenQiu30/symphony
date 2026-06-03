@@ -46,7 +46,7 @@ codex:
 claude:
   command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
 cursor:
-  command: cursor-symphony-bridge
+  command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
 gemini:
   command: gemini -p --output-format json
 ---
@@ -83,6 +83,17 @@ Instructions:
 3. Final message must report completed actions and blockers only. Do not include "next steps for user".
 
 Work only in the provided repository copy. Do not touch any other path.
+
+## Agent runtime selection
+
+Symphony selects the agent runtime from Linear labels configured in `agent.runtime_by_label`:
+
+- `agent:codex` → Codex app-server
+- `agent:claude` → Claude CLI
+- `agent:cursor` → Cursor CLI
+- `agent:gemini` → Gemini CLI
+
+When no matching label is present, Symphony uses `agent.default_runtime` (codex by default in this workflow).
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 

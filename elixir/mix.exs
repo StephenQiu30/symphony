@@ -82,7 +82,7 @@ defmodule SymphonyElixir.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "escript.build", "symphony.install"],
+      setup: ["deps.get", "escript.build"],
       build: ["escript.build"],
       lint: ["specs.check", "credo --strict"]
     ]

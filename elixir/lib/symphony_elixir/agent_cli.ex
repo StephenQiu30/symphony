@@ -5,10 +5,10 @@ defmodule SymphonyElixir.AgentCli do
   alias SymphonyElixir.{Config, SSH}
 
   @port_line_bytes 1_048_576
-  @type runtime :: :claude | :gemini
+  @type runtime :: :claude | :cursor | :gemini
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :gemini] do
+  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :gemini] do
     worker_host = Keyword.get(opts, :worker_host)
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"

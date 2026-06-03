@@ -5,10 +5,10 @@ defmodule SymphonyElixir.AgentCli do
   alias SymphonyElixir.{Config, SSH}
 
   @port_line_bytes 1_048_576
-  @type runtime :: :claude | :cursor | :gemini
+  @type runtime :: :claude | :gemini
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :gemini] do
+  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :gemini] do
     worker_host = Keyword.get(opts, :worker_host)
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
@@ -148,13 +148,44 @@ defmodule SymphonyElixir.AgentCli do
         complete_cli_turn(runtime, on_message, metadata, state)
 
       {^port, {:exit_status, status}} ->
+        {pending_line, state} =
+          drain_available_port_output(port, on_message, metadata, pending_line, state)
+
+        state = flush_pending_cli_line(on_message, metadata, pending_line, state)
         reason = {:cli_agent_exit, runtime, status}
         emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: reason}, metadata)
         {:error, reason}
     after
       timeout_ms ->
+        {pending_line, state} =
+          drain_available_port_output(port, on_message, metadata, pending_line, state)
+
+        state = flush_pending_cli_line(on_message, metadata, pending_line, state)
         emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: :turn_timeout}, metadata)
         {:error, :turn_timeout}
+    end
+  end
+
+  defp drain_available_port_output(port, on_message, metadata, pending_line, state) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        line = pending_line <> to_string(chunk)
+        state = emit_cli_line(on_message, line, metadata, state)
+        drain_available_port_output(port, on_message, metadata, "", state)
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        drain_available_port_output(port, on_message, metadata, pending_line <> to_string(chunk), state)
+    after
+      0 ->
+        {pending_line, state}
+    end
+  end
+
+  defp flush_pending_cli_line(on_message, metadata, pending_line, state) do
+    if pending_line != "" do
+      emit_cli_line(on_message, pending_line, metadata, state)
+    else
+      state
     end
   end
 

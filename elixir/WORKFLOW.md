@@ -46,7 +46,7 @@ codex:
 claude:
   command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
 cursor:
-  command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
+  command: cursor-symphony-bridge
 gemini:
   command: gemini -p --output-format json
 ---

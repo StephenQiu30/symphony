@@ -48,27 +48,6 @@ def session_log(message: str) -> None:
     _session_log.flush()
 
 
-def load_machine_env() -> None:
-    env_file = os.path.expanduser("~/.config/symphony/cursor.env")
-    if not os.path.isfile(env_file):
-        return
-
-    with open(env_file, "r", encoding="utf-8") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("'\"")
-            if key and not os.environ.get(key, "").strip():
-                os.environ[key] = value
-
-
 def find_cursor_binary(explicit_binary: str | None = None) -> str:
     candidates = [explicit_binary] if explicit_binary else []
     candidates.extend([os.environ.get("CURSOR_AGENT_BIN"), "agent", "cursor-agent"])
@@ -441,8 +420,6 @@ class Bridge:
 
 
 def main() -> None:
-    load_machine_env()
-
     parser = argparse.ArgumentParser(description="Symphony Cursor ACP bridge")
     parser.add_argument("--model", default=os.environ.get("CURSOR_MODEL"))
     parser.add_argument("--agent-bin", default=None, help="Cursor CLI binary, defaults to CURSOR_AGENT_BIN, agent, then cursor-agent")

@@ -53,8 +53,7 @@ does not hardcode an account and does not assume `popcornqhd@gmail.com`.
 Authentication precedence:
 
 1. Non-empty `CURSOR_API_KEY` from the shell or project `.env`
-2. Non-empty `CURSOR_API_KEY` from `~/.config/symphony/cursor.env`
-3. The active Cursor CLI login on the current machine
+2. The active Cursor CLI login on the current machine
 
 For a developer machine, prefer the Cursor login stored by the CLI:
 
@@ -70,11 +69,10 @@ CURSOR_API_KEY=...
 ```
 
 It is safe to leave `CURSOR_API_KEY=` blank in the project `.env`; the bridge
-will still fall back to the global machine-local config file.
+will fall back to the active Cursor CLI login.
 
 To prevent accidental use of the wrong local account, set
-`SYMPHONY_CURSOR_EXPECTED_ACCOUNT` in the shell or a machine-local secret file
-such as `~/.config/symphony/cursor.env`:
+`SYMPHONY_CURSOR_EXPECTED_ACCOUNT` in the shell or project `.env`:
 
 ```env
 SYMPHONY_CURSOR_EXPECTED_ACCOUNT=you@example.com

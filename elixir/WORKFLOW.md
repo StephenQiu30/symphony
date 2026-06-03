@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  project_slug: "symphony-0c79b11b75ea"
+  project_slug: "$SYMPHONY_LINEAR_PROJECT_SLUG"
   active_states:
     - Todo
     - In Progress
@@ -15,26 +15,40 @@ tracker:
     - Done
 polling:
   interval_ms: 5000
+server:
+  host: "$SYMPHONY_SERVER_HOST"
 workspace:
-  root: ~/code/symphony-workspaces
+  root: "$SYMPHONY_WORKSPACE_ROOT"
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/openai/symphony .
+    git clone --depth 1 "$SOURCE_REPO_URL" .
     if command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
     fi
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
+  default_runtime: codex
   max_concurrent_agents: 10
   max_turns: 20
+  runtime_by_label:
+    agent:codex: codex
+    agent:claude: claude
+    agent:cursor: cursor
+    agent:gemini: gemini
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
-  thread_sandbox: workspace-write
+  thread_sandbox: danger-full-access
   turn_sandbox_policy:
-    type: workspaceWrite
+    type: dangerFullAccess
     networkAccess: true
+claude:
+  command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
+cursor:
+  command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
+gemini:
+  command: gemini -p --output-format json
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`

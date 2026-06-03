@@ -128,10 +128,12 @@ defmodule SymphonyElixir.Config.Schema do
 
     @primary_key false
     embedded_schema do
+      field(:default_runtime, :string)
       field(:max_concurrent_agents, :integer, default: 10)
       field(:max_turns, :integer, default: 20)
       field(:max_retry_backoff_ms, :integer, default: 300_000)
       field(:max_concurrent_agents_by_state, :map, default: %{})
+      field(:runtime_by_label, :map, default: %{})
     end
 
     @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
@@ -139,14 +141,24 @@ defmodule SymphonyElixir.Config.Schema do
       schema
       |> cast(
         attrs,
-        [:max_concurrent_agents, :max_turns, :max_retry_backoff_ms, :max_concurrent_agents_by_state],
+        [
+          :default_runtime,
+          :max_concurrent_agents,
+          :max_turns,
+          :max_retry_backoff_ms,
+          :max_concurrent_agents_by_state,
+          :runtime_by_label
+        ],
         empty_values: []
       )
+      |> validate_inclusion(:default_runtime, ["codex", "claude", "cursor", "gemini"])
       |> validate_number(:max_concurrent_agents, greater_than: 0)
       |> validate_number(:max_turns, greater_than: 0)
       |> validate_number(:max_retry_backoff_ms, greater_than: 0)
       |> update_change(:max_concurrent_agents_by_state, &Schema.normalize_state_limits/1)
       |> Schema.validate_state_limits(:max_concurrent_agents_by_state)
+      |> update_change(:runtime_by_label, &Schema.normalize_runtime_by_label/1)
+      |> Schema.validate_runtime_by_label(:runtime_by_label)
     end
   end
 
@@ -196,6 +208,30 @@ defmodule SymphonyElixir.Config.Schema do
       |> validate_number(:turn_timeout_ms, greater_than: 0)
       |> validate_number(:read_timeout_ms, greater_than: 0)
       |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
+    end
+  end
+
+  defmodule CliRuntime do
+    @moduledoc false
+    use Ecto.Schema
+    import Ecto.Changeset
+
+    @primary_key false
+    embedded_schema do
+      field(:command, :string)
+      field(:prompt_mode, :string, default: "argument")
+      field(:turn_timeout_ms, :integer, default: 3_600_000)
+      field(:read_timeout_ms, :integer, default: 5_000)
+    end
+
+    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
+    def changeset(schema, attrs) do
+      schema
+      |> cast(attrs, [:command, :prompt_mode, :turn_timeout_ms, :read_timeout_ms], empty_values: [])
+      |> validate_required([:command])
+      |> validate_inclusion(:prompt_mode, ["stdin", "argument"])
+      |> validate_number(:turn_timeout_ms, greater_than: 0)
+      |> validate_number(:read_timeout_ms, greater_than: 0)
     end
   end
 
@@ -268,6 +304,9 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:worker, Worker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:agent, Agent, on_replace: :update, defaults_to_struct: true)
     embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:claude, CliRuntime, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:cursor, CliRuntime, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:gemini, CliRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
@@ -333,6 +372,39 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   @doc false
+  @spec normalize_runtime_by_label(nil | map()) :: map()
+  def normalize_runtime_by_label(nil), do: %{}
+
+  def normalize_runtime_by_label(runtime_by_label) when is_map(runtime_by_label) do
+    Enum.reduce(runtime_by_label, %{}, fn {label, runtime}, acc ->
+      Map.put(acc, normalize_label(label), to_string(runtime))
+    end)
+  end
+
+  @doc false
+  @spec validate_runtime_by_label(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
+  def validate_runtime_by_label(changeset, field) do
+    validate_change(changeset, field, fn ^field, runtime_by_label ->
+      Enum.flat_map(runtime_by_label, fn {label, runtime} ->
+        cond do
+          label == "" -> [{field, "labels must not be blank"}]
+          runtime not in ["codex", "claude", "cursor", "gemini"] -> [{field, "runtime values must be one of codex, claude, cursor, gemini"}]
+          true -> []
+        end
+      end)
+    end)
+  end
+
+  @doc false
+  @spec normalize_label(term()) :: String.t()
+  def normalize_label(label) do
+    label
+    |> to_string()
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  @doc false
   @spec validate_state_limits(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
   def validate_state_limits(changeset, field) do
     validate_change(changeset, field, fn ^field, limits ->
@@ -360,6 +432,9 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:worker, with: &Worker.changeset/2)
     |> cast_embed(:agent, with: &Agent.changeset/2)
     |> cast_embed(:codex, with: &Codex.changeset/2)
+    |> cast_embed(:claude, with: &CliRuntime.changeset/2)
+    |> cast_embed(:cursor, with: &CliRuntime.changeset/2)
+    |> cast_embed(:gemini, with: &CliRuntime.changeset/2)
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
@@ -369,6 +444,7 @@ defmodule SymphonyElixir.Config.Schema do
     tracker = %{
       settings.tracker
       | api_key: resolve_secret_setting(settings.tracker.api_key, System.get_env("LINEAR_API_KEY")),
+        project_slug: resolve_plain_setting(settings.tracker.project_slug, System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")),
         assignee: resolve_secret_setting(settings.tracker.assignee, System.get_env("LINEAR_ASSIGNEE"))
     }
 
@@ -383,7 +459,9 @@ defmodule SymphonyElixir.Config.Schema do
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex}
+    server = %{settings.server | host: resolve_plain_setting(settings.server.host, System.get_env("SYMPHONY_SERVER_HOST") || "0.0.0.0")}
+
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, server: server}
   end
 
   defp normalize_keys(value) when is_map(value) do
@@ -418,6 +496,15 @@ defmodule SymphonyElixir.Config.Schema do
   defp resolve_secret_setting(value, fallback) when is_binary(value) do
     case resolve_env_value(value, fallback) do
       resolved when is_binary(resolved) -> normalize_secret_value(resolved)
+      resolved -> resolved
+    end
+  end
+
+  defp resolve_plain_setting(nil, fallback), do: normalize_plain_value(fallback)
+
+  defp resolve_plain_setting(value, fallback) when is_binary(value) do
+    case resolve_env_value(value, fallback) do
+      resolved when is_binary(resolved) -> normalize_plain_value(resolved)
       resolved -> resolved
     end
   end
@@ -478,6 +565,12 @@ defmodule SymphonyElixir.Config.Schema do
   end
 
   defp normalize_secret_value(_value), do: nil
+
+  defp normalize_plain_value(value) when is_binary(value) do
+    if value == "", do: nil, else: value
+  end
+
+  defp normalize_plain_value(_value), do: nil
 
   defp default_turn_sandbox_policy(workspace) do
     %{

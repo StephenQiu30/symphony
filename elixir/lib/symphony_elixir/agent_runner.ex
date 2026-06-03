@@ -5,7 +5,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   require Logger
   alias SymphonyElixir.Codex.AppServer
-  alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
+  alias SymphonyElixir.{AgentCli, Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
 
   @type worker_host :: String.t() | nil
 
@@ -35,7 +35,7 @@ defmodule SymphonyElixir.AgentRunner do
 
         try do
           with :ok <- Workspace.run_before_run_hook(workspace, issue, worker_host) do
-            run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+            run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host)
           end
         after
           Workspace.run_after_run_hook(workspace, issue, worker_host)
@@ -76,6 +76,16 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
+  defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
+    case Config.agent_runtime(issue) do
+      runtime when runtime in [:claude, :cursor, :gemini] ->
+        run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
+
+      :codex ->
+        run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host)
+    end
+  end
+
   defp run_codex_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
@@ -85,6 +95,38 @@ defmodule SymphonyElixir.AgentRunner do
         do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
       after
         AppServer.stop_session(session)
+      end
+    end
+  end
+
+  defp run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host) do
+    max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
+    issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
+    do_run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host, issue_state_fetcher, 1, max_turns)
+  end
+
+  defp do_run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host, issue_state_fetcher, turn_number, max_turns) do
+    prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
+
+    with {:ok, turn_session} <-
+           AgentCli.run(runtime, workspace, prompt, issue,
+             worker_host: worker_host,
+             on_message: codex_message_handler(codex_update_recipient, issue)
+           ) do
+      Logger.info("Completed #{runtime} agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
+
+      case continue_with_issue?(issue, issue_state_fetcher) do
+        {:continue, refreshed_issue} when turn_number < max_turns ->
+          do_run_cli_agent_turns(runtime, workspace, refreshed_issue, codex_update_recipient, opts, worker_host, issue_state_fetcher, turn_number + 1, max_turns)
+
+        {:continue, _refreshed_issue} ->
+          :ok
+
+        {:done, _refreshed_issue} ->
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end

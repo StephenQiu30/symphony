@@ -484,7 +484,7 @@ Fields:
 Fields:
 
 - `command` (string shell command)
-  - Default: `cursor-agent -p --force --sandbox disabled`
+  - Default: `cursor-symphony-bridge`
   - The runtime launches this command via `bash -lc` in the workspace directory.
   - Implementations SHOULD force headless print mode, high-permission operation, and structured
     streaming output when the configured command omits those flags.
@@ -495,6 +495,12 @@ Fields:
   - Default: `3600000` (1 hour)
 - `read_timeout_ms` (integer)
   - Default: `5000`
+
+Cursor authentication is selected by `cursor-symphony-bridge`. The bridge MUST
+prefer the active local Cursor CLI login when it is usable and MUST fall back to
+`CURSOR_API_KEY` only when the local login is unavailable, rejected by
+`SYMPHONY_CURSOR_EXPECTED_ACCOUNT`, or cannot be checked. The bridge MUST NOT log
+API key values.
 
 ### 5.4 Prompt Template Contract
 
@@ -642,7 +648,7 @@ not require recognizing or validating extension fields unless that extension is 
 - `claude.prompt_mode`: `stdin` or `argument`, default `stdin`
 - `claude.turn_timeout_ms`: integer, default `3600000`
 - `claude.read_timeout_ms`: integer, default `5000`
-- `cursor.command`: shell command string, default `cursor-agent -p --force --sandbox disabled`
+- `cursor.command`: shell command string, default `cursor-symphony-bridge`
 - `cursor.prompt_mode`: `stdin` or `argument`, default `argument`
 - `cursor.turn_timeout_ms`: integer, default `3600000`
 - `cursor.read_timeout_ms`: integer, default `5000`

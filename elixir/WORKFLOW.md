@@ -52,7 +52,7 @@ routing:
   default_agent: codex
   by_label:
     agent:codex: codex
-    agent:claude: cursor
+    agent:claude: claude
     agent:cursor: cursor
 ---
 
@@ -97,7 +97,7 @@ Repository and branch guardrails:
   - If the repository does not match, do not create a branch, commit, push, or PR. Record the mismatch in the workpad and stop as blocked.
 - Branch names must be ASCII only. Do not use Linear `gitBranchName` verbatim when it contains non-ASCII characters.
 - Use an agent-scoped branch prefix:
-  - `cursor/<issue-identifier-lowercase>-<short-english-slug>` for `agent:cursor` and legacy `agent:claude` labels.
+  - `cursor/<issue-identifier-lowercase>-<short-english-slug>` for `agent:cursor`.
   - `codex/<issue-identifier-lowercase>-<short-english-slug>` for `agent:codex`.
 - Commit messages must use the requested conventional style, for example `test: ...`, `impl(cursor): ...`, `feat(...): ...`, `refactor(...): ...`, or `chore: ...`.
 

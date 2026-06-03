@@ -10,6 +10,7 @@ spawning one short-lived `cursor-agent -p` process per turn.
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import os
 import shutil
@@ -22,6 +23,9 @@ import uuid
 
 
 BRIDGE_VERSION = "1.0.0"
+AUTH_LOCAL_LOGIN = "local_login"
+AUTH_API_KEY_FALLBACK = "api_key_fallback"
+DEFAULT_TERMINAL_OUTPUT_LIMIT = 1_048_576
 
 
 def log(message: str) -> None:
@@ -62,7 +66,27 @@ def find_cursor_binary(explicit_binary: str | None = None) -> str:
     raise RuntimeError("Cursor CLI not found on PATH. Install Cursor CLI or set CURSOR_AGENT_BIN.")
 
 
-def cursor_status(binary: str) -> str:
+@dataclass(frozen=True)
+class CursorStatus:
+    output: str
+    returncode: int | None = None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.error is None and self.returncode == 0
+
+    def diagnostic(self) -> str:
+        details = self.output.strip()
+        if self.error:
+            return self.error if not details else f"{self.error}\n{details}"
+        if self.returncode not in (None, 0):
+            prefix = f"cursor status exited with {self.returncode}"
+            return prefix if not details else f"{prefix}:\n{details}"
+        return details
+
+
+def cursor_status(binary: str) -> CursorStatus:
     try:
         result = subprocess.run(
             [binary, "status"],
@@ -73,29 +97,247 @@ def cursor_status(binary: str) -> str:
             timeout=20,
         )
     except Exception as exc:
-        return f"cursor status failed: {exc}"
+        return CursorStatus(output="", error=f"cursor status failed: {exc}")
 
-    return result.stdout or ""
+    return CursorStatus(output=result.stdout or "", returncode=result.returncode)
 
 
-def assert_expected_account(binary: str) -> None:
+def has_api_key() -> bool:
+    return bool(os.environ.get("CURSOR_API_KEY", "").strip())
+
+
+def current_logged_in_account(status: CursorStatus) -> str | None:
+    marker = "Logged in as "
+    for line in status.output.splitlines():
+        if marker in line:
+            return line.split(marker, 1)[1].strip()
+    return None
+
+
+def local_login_is_usable(status: CursorStatus) -> bool:
+    return status.ok and current_logged_in_account(status) is not None
+
+
+def expected_account_matches(status: CursorStatus) -> bool:
     expected = os.environ.get("SYMPHONY_CURSOR_EXPECTED_ACCOUNT", "").strip()
     if not expected:
-        return
+        return True
 
+    return current_logged_in_account(status) == expected
+
+
+def choose_auth_source(binary: str) -> str:
     status = cursor_status(binary)
-    if f"Logged in as {expected}" not in status:
-        raise RuntimeError(
-            "Cursor CLI is not logged in as "
-            f"{expected}. Current status:\n{status.strip()}"
+    expected = os.environ.get("SYMPHONY_CURSOR_EXPECTED_ACCOUNT", "").strip()
+
+    if local_login_is_usable(status) and expected_account_matches(status):
+        account = current_logged_in_account(status)
+        log(f"using local Cursor login ({account})")
+        return AUTH_LOCAL_LOGIN
+
+    if has_api_key():
+        reason = status.diagnostic() or "Cursor CLI is not logged in"
+        if local_login_is_usable(status) and expected:
+            reason = (
+                "Cursor CLI local login account does not match "
+                f"SYMPHONY_CURSOR_EXPECTED_ACCOUNT={expected}; "
+                f"current account is {current_logged_in_account(status)}"
+            )
+        log(f"using CURSOR_API_KEY fallback: {reason}")
+        return AUTH_API_KEY_FALLBACK
+
+    if not local_login_is_usable(status):
+        reason = status.diagnostic() or "Cursor CLI is not logged in"
+    elif expected:
+        reason = (
+            "expected account "
+            f"{expected}, current account {current_logged_in_account(status)}"
         )
+    else:
+        reason = status.diagnostic() or "unknown Cursor login status"
+
+    raise RuntimeError(f"Cursor CLI local login is not usable and CURSOR_API_KEY is not set. {reason}")
+
+
+class TerminalProcess:
+    def __init__(self, process: subprocess.Popen, output_limit: int) -> None:
+        self.process = process
+        self.output_limit = output_limit
+        self.output = ""
+        self.truncated = False
+        self._lock = threading.Lock()
+        self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._reader_thread.start()
+
+    def _read_loop(self) -> None:
+        if self.process.stdout is None:
+            return
+
+        try:
+            for chunk in iter(lambda: self.process.stdout.read(4096), ""):
+                if not chunk:
+                    break
+                self._append_output(chunk)
+        except Exception as exc:
+            self._append_output(f"\n[symphony terminal reader failed: {exc}]\n")
+
+    def _append_output(self, chunk: str) -> None:
+        with self._lock:
+            self.output += chunk
+            if len(self.output.encode("utf-8", errors="replace")) > self.output_limit:
+                self.truncated = True
+                while len(self.output.encode("utf-8", errors="replace")) > self.output_limit:
+                    self.output = self.output[max(1, len(self.output) // 4):]
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            result = {"output": self.output, "truncated": self.truncated}
+
+        exit_status = self.exit_status()
+        if exit_status is not None:
+            result["exitStatus"] = exit_status
+
+        return result
+
+    def exit_status(self) -> dict | None:
+        returncode = self.process.poll()
+        if returncode is None:
+            return None
+
+        if returncode < 0:
+            return {"exitCode": None, "signal": signal.Signals(-returncode).name}
+
+        return {"exitCode": returncode, "signal": None}
+
+    def wait_for_exit(self) -> dict:
+        returncode = self.process.wait()
+        if self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1)
+
+        if returncode < 0:
+            return {"exitCode": None, "signal": signal.Signals(-returncode).name}
+
+        return {"exitCode": returncode, "signal": None}
+
+    def kill(self) -> dict:
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+
+        return self.wait_for_exit()
+
+
+class TerminalManager:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._terminals: dict[str, TerminalProcess] = {}
+
+    def create(self, params: dict) -> dict:
+        command = params.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise RuntimeError("terminal/create requires a non-empty command")
+
+        args = params.get("args", [])
+        if args is None:
+            args = []
+        if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+            raise RuntimeError("terminal/create args must be a list of strings")
+
+        cwd = params.get("cwd") or os.getcwd()
+        if not isinstance(cwd, str) or not cwd.strip():
+            raise RuntimeError("terminal/create cwd must be a non-empty string")
+
+        env = os.environ.copy()
+        for entry in params.get("env", []) or []:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                env[entry["name"]] = str(entry.get("value", ""))
+
+        output_limit = params.get("outputByteLimit") or DEFAULT_TERMINAL_OUTPUT_LIMIT
+        try:
+            output_limit = int(output_limit)
+        except Exception:
+            output_limit = DEFAULT_TERMINAL_OUTPUT_LIMIT
+        output_limit = max(1, output_limit)
+
+        process = subprocess.Popen(
+            [command, *args],
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+
+        terminal_id = f"term-{uuid.uuid4().hex[:12]}"
+        with self._lock:
+            self._terminals[terminal_id] = TerminalProcess(process, output_limit)
+
+        session_log(
+            f"[TERMINAL] create id={terminal_id} pid={process.pid} cwd={cwd} command={command} args={args}"
+        )
+        return {"terminalId": terminal_id}
+
+    def output(self, params: dict) -> dict:
+        return self._get(params).snapshot()
+
+    def wait_for_exit(self, params: dict) -> dict:
+        return self._get(params).wait_for_exit()
+
+    def kill(self, params: dict) -> dict:
+        terminal = self._get(params)
+        session_log(f"[TERMINAL] kill id={params.get('terminalId')}")
+        return terminal.kill()
+
+    def release(self, params: dict) -> dict:
+        terminal_id = self._terminal_id(params)
+        with self._lock:
+            terminal = self._terminals.pop(terminal_id, None)
+
+        if terminal is not None and terminal.process.poll() is None:
+            terminal.kill()
+
+        session_log(f"[TERMINAL] release id={terminal_id}")
+        return {}
+
+    def release_all(self) -> None:
+        with self._lock:
+            terminal_ids = list(self._terminals.keys())
+
+        for terminal_id in terminal_ids:
+            try:
+                self.release({"terminalId": terminal_id})
+            except Exception:
+                pass
+
+    def _get(self, params: dict) -> TerminalProcess:
+        terminal_id = self._terminal_id(params)
+        with self._lock:
+            terminal = self._terminals.get(terminal_id)
+        if terminal is None:
+            raise RuntimeError(f"unknown terminalId: {terminal_id}")
+        return terminal
+
+    @staticmethod
+    def _terminal_id(params: dict) -> str:
+        terminal_id = params.get("terminalId")
+        if not isinstance(terminal_id, str) or not terminal_id:
+            raise RuntimeError("terminalId is required")
+        return terminal_id
 
 
 class ACPClient:
-    def __init__(self, binary: str, model: str | None = None) -> None:
+    def __init__(self, binary: str, model: str | None = None, auth_source: str = AUTH_LOCAL_LOGIN) -> None:
         self.binary = binary
         self.model = model
+        self.auth_source = auth_source
         self.process: subprocess.Popen | None = None
+        self.terminals = TerminalManager()
         self._alive = False
         self._lock = threading.Lock()
         self._next_id = 1
@@ -110,7 +352,7 @@ class ACPClient:
         cmd = [self.binary]
 
         api_key = os.environ.get("CURSOR_API_KEY")
-        if api_key:
+        if self.auth_source == AUTH_API_KEY_FALLBACK and api_key:
             cmd.extend(["--api-key", api_key])
 
         if self.model:
@@ -133,6 +375,7 @@ class ACPClient:
 
     def stop(self) -> None:
         self._alive = False
+        self.terminals.release_all()
         if self.process and self.process.poll() is None:
             try:
                 self.process.terminate()
@@ -150,7 +393,7 @@ class ACPClient:
                 "protocolVersion": 1,
                 "clientCapabilities": {
                     "fs": {"readTextFile": False, "writeTextFile": False},
-                    "terminal": False,
+                    "terminal": True,
                 },
                 "clientInfo": {
                     "name": "symphony-cursor-bridge",
@@ -255,11 +498,22 @@ class ACPClient:
         method = message.get("method")
         if method == "session/request_permission" and message_id is not None:
             session_log(f"[PERMISSION] auto-approved {json.dumps(message.get('params', {}), ensure_ascii=False)[:500]}")
+            self._write({"jsonrpc": "2.0", "id": message_id, "result": self._permission_result(message)})
+            return
+
+        if method and method.startswith("terminal/") and message_id is not None:
+            self._handle_terminal_request(message_id, method, message.get("params", {}))
+            return
+
+        if method and method.startswith("fs/") and message_id is not None:
             self._write(
                 {
                     "jsonrpc": "2.0",
                     "id": message_id,
-                    "result": {"outcome": {"outcome": "selected", "optionId": "allow-always"}},
+                    "error": {
+                        "code": -32601,
+                        "message": f"Client method is not supported: {method}",
+                    },
                 }
             )
             return
@@ -275,6 +529,56 @@ class ACPClient:
         if method and message_id is not None:
             session_log(f"[ACP] unhandled request method={method}")
             self._write({"jsonrpc": "2.0", "id": message_id, "result": {}})
+
+    def _permission_result(self, message: dict) -> dict:
+        params = message.get("params", {})
+        options = params.get("options", []) if isinstance(params, dict) else []
+
+        for preferred_kind in ("allow_always", "allow_once"):
+            for option in options:
+                if isinstance(option, dict) and option.get("kind") == preferred_kind:
+                    return {
+                        "outcome": {
+                            "outcome": "selected",
+                            "optionId": option.get("optionId"),
+                        }
+                    }
+
+        return {"outcome": {"outcome": "selected", "optionId": "allow-always"}}
+
+    def _handle_terminal_request(self, message_id: int, method: str, params: dict) -> None:
+        try:
+            if method == "terminal/create":
+                result = self.terminals.create(params if isinstance(params, dict) else {})
+            elif method == "terminal/output":
+                result = self.terminals.output(params if isinstance(params, dict) else {})
+            elif method == "terminal/wait_for_exit":
+                result = self.terminals.wait_for_exit(params if isinstance(params, dict) else {})
+            elif method == "terminal/kill":
+                result = self.terminals.kill(params if isinstance(params, dict) else {})
+            elif method == "terminal/release":
+                result = self.terminals.release(params if isinstance(params, dict) else {})
+            else:
+                self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": message_id,
+                        "error": {"code": -32601, "message": f"Method not found: {method}"},
+                    }
+                )
+                return
+        except Exception as exc:
+            session_log(f"[TERMINAL] {method} failed: {exc}")
+            self._write(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message_id,
+                    "error": {"code": -32000, "message": str(exc)},
+                }
+            )
+            return
+
+        self._write({"jsonrpc": "2.0", "id": message_id, "result": result})
 
     def _log_update(self, message: dict) -> None:
         params = message.get("params", {})
@@ -293,11 +597,12 @@ class ACPClient:
 
 
 class Bridge:
-    def __init__(self, binary: str, model: str | None = None, timeout: int = 3600) -> None:
+    def __init__(self, binary: str, model: str | None = None, timeout: int = 3600, auth_source: str = AUTH_LOCAL_LOGIN) -> None:
         self.binary = binary
         self.model = model
         self.timeout = timeout
-        self.acp = ACPClient(binary, model)
+        self.auth_source = auth_source
+        self.acp = ACPClient(binary, model, auth_source)
         self.thread_sessions: dict[str, str] = {}
 
     def start(self) -> None:
@@ -396,7 +701,7 @@ class Bridge:
 
     def restart_acp(self) -> None:
         self.acp.stop()
-        self.acp = ACPClient(self.binary, self.model)
+        self.acp = ACPClient(self.binary, self.model, self.auth_source)
         self.acp.start()
         self.acp.initialize()
         try:
@@ -435,16 +740,16 @@ def main() -> None:
 
     if args.version:
         print(f"cursor-symphony-bridge {BRIDGE_VERSION}")
-        print(cursor_status(binary).strip())
+        print(cursor_status(binary).diagnostic())
         return
 
     try:
-        assert_expected_account(binary)
+        auth_source = choose_auth_source(binary)
     except Exception as exc:
         log(str(exc))
         sys.exit(1)
 
-    bridge = Bridge(binary, args.model, args.turn_timeout)
+    bridge = Bridge(binary, args.model, args.turn_timeout, auth_source)
 
     def shutdown(_signum, _frame) -> None:
         bridge.stop()

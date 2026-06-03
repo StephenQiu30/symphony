@@ -24,7 +24,6 @@ agents:
 routing:
   by_label:
     agent:cursor: cursor
-    agent:claude: cursor
 ```
 
 ## Install The Bridge
@@ -47,13 +46,14 @@ machine-specific command path.
 
 ## Authentication Modes
 
-Cursor Agent supports both local login and API-key authentication. The bridge
-does not hardcode an account and does not assume `popcornqhd@gmail.com`.
+Cursor Agent supports both local login and API-key authentication. Symphony's
+bridge uses a login-first strategy for developer machines and treats
+`CURSOR_API_KEY` as a fallback for CI or unattended hosts.
 
 Authentication precedence:
 
-1. Non-empty `CURSOR_API_KEY` from the shell or project `.env`
-2. The active Cursor CLI login on the current machine
+1. A usable active Cursor CLI login on the current machine
+2. Non-empty `CURSOR_API_KEY` from the shell or project `.env`
 
 For a developer machine, prefer the Cursor login stored by the CLI:
 
@@ -62,14 +62,16 @@ cursor-agent login
 cursor-agent status
 ```
 
-For CI or non-interactive machines, use an API key:
+For CI or non-interactive machines, set an API key:
 
 ```env
 CURSOR_API_KEY=...
 ```
 
 It is safe to leave `CURSOR_API_KEY=` blank in the project `.env`; the bridge
-will fall back to the active Cursor CLI login.
+will use the active Cursor CLI login when it is available. If the CLI login is
+missing or rejected by the expected-account guard, the bridge falls back to
+`CURSOR_API_KEY`.
 
 To prevent accidental use of the wrong local account, set
 `SYMPHONY_CURSOR_EXPECTED_ACCOUNT` in the shell or project `.env`:
@@ -78,9 +80,11 @@ To prevent accidental use of the wrong local account, set
 SYMPHONY_CURSOR_EXPECTED_ACCOUNT=you@example.com
 ```
 
-When set, the bridge runs Cursor CLI `status` before launching and fails fast if
-the active account does not match. Leave it blank if the current machine should
-use whichever Cursor account is logged in.
+When set, the bridge checks Cursor CLI `status` before launching. If the active
+account matches, the bridge uses local login. If it does not match and
+`CURSOR_API_KEY` is configured, the bridge uses API-key fallback. If neither
+source is usable, startup fails with a clear diagnostic. Leave it blank if the
+current machine should use whichever Cursor account is logged in.
 
 ## Observability
 

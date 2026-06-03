@@ -135,7 +135,8 @@ defmodule SymphonyElixir.CoreTest do
 
     routing = Map.get(config, "routing", %{})
     assert Map.get(routing, "default_agent") == "codex"
-    assert get_in(routing, ["by_label", "agent:claude"]) == "cursor"
+    assert get_in(routing, ["by_label", "agent:claude"]) == "claude"
+    assert get_in(routing, ["by_label", "agent:cursor"]) == "cursor"
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())

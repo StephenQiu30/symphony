@@ -1052,7 +1052,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     routing:
       default_agent: codex
       by_label:
-        agent:claude: cursor
+        agent:claude: claude
         agent:cursor: cursor
         agent:codex: codex
     ---
@@ -1068,12 +1068,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.cursor.thread_sandbox == "danger-full-access"
 
     assert config.agent.runtime_by_label == %{
-             "agent:claude" => "cursor",
+             "agent:claude" => "claude",
              "agent:cursor" => "cursor",
              "agent:codex" => "codex"
            }
 
-    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :cursor
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :claude
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:cursor"]}) == :cursor
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:codex"]}) == :codex
     assert :ok = Config.validate!()
@@ -1087,7 +1087,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     agent:
       default_runtime: codex
       runtime_by_label:
-        agent:claude: cursor
+        agent:claude: claude
         agent:cursor: cursor
         agent:codex: codex
     ---
@@ -1101,13 +1101,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.agent.default_runtime == "codex"
 
     assert config.agent.runtime_by_label == %{
-             "agent:claude" => "cursor",
+             "agent:claude" => "claude",
              "agent:cursor" => "cursor",
              "agent:codex" => "codex"
            }
 
     assert Config.agent_runtime() == :codex
-    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["Agent:Claude"]}) == :cursor
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["Agent:Claude"]}) == :claude
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: [" agent:cursor "]}) ==
              :cursor

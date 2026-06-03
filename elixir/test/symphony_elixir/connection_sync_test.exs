@@ -6,7 +6,15 @@ defmodule SymphonyElixir.ConnectionSyncTest do
   setup do
     name = :"sync_store_#{System.unique_integer([:positive])}"
     {:ok, store} = ConnectionStore.start_link(name: name)
-    on_exit(fn -> if Process.alive?(store), do: GenServer.stop(store) end)
+
+    on_exit(fn ->
+      try do
+        if Process.alive?(store), do: GenServer.stop(store)
+      catch
+        :exit, _ -> :ok
+      end
+    end)
+
     %{store: name}
   end
 

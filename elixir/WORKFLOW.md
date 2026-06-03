@@ -94,6 +94,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - Start every task by opening the tracking workpad comment and bringing it up to date before doing new implementation work.
 - Spend extra effort up front on planning and verification design before implementation.
 - Reproduce first: always confirm the current behavior/issue signal before changing code so the fix target is explicit.
+- Follow TDD/test-first by default: define the expected behavior as a failing automated test or executable validation before implementation. If a test cannot be written first, document the reason in the workpad and add the closest executable acceptance check before coding.
 - Keep ticket metadata current (state, checklist, acceptance criteria, links).
 - Treat a single persistent Linear comment as the source of truth for progress.
 - Use that single workpad comment for all progress and handoff notes; do not post separate "done"/summary comments.
@@ -107,6 +108,19 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - Move status only when the matching quality bar is met.
 - Operate autonomously end-to-end unless blocked by missing requirements, secrets, or permissions.
 - Use the blocked-access escape hatch only for true external blockers (missing required tools/auth) after exhausting documented fallbacks.
+
+## Commit Discipline
+
+Allowed commit types are fixed: `test:`, `docs:`, `impl:`, `chore:`, `feat:`, and `refactor:`.
+
+- Use `test:` for failing tests, fixtures, mocks, acceptance scripts, and test-only expectations.
+- Use `impl:` for the smallest implementation that makes existing red tests pass.
+- Use `feat:` for user-visible capability or behavior changes, backed by prior `test:` evidence unless explicitly documented as not scriptable.
+- Use `refactor:` only after tests are green, and do not change verified behavior.
+- Use `docs:` for documentation, examples, workflow text, and acceptance notes.
+- Use `chore:` for CI, configuration, dependency metadata, generated housekeeping, or repository maintenance.
+- For feature and behavior work, preserve test-first commit order: `test:` first, then `impl:`/`feat:`, then optional `refactor:`, `docs:`, or `chore:` cleanup.
+- Do not mix unrelated commit types in one commit. If a change spans tests, implementation, and docs, split commits by type whenever practical.
 
 ## Related skills
 
@@ -171,14 +185,15 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
     - If changes are user-facing, include a UI walkthrough acceptance criterion that describes the end-to-end user path to validate.
     - If changes touch app files or app behavior, add explicit app-specific flow checks to `Acceptance Criteria` in the workpad (for example: launch path, changed interaction path, and expected result path).
     - If the ticket description/comment context includes `Validation`, `Test Plan`, or `Testing` sections, copy those requirements into the workpad `Acceptance Criteria` and `Validation` sections as required checkboxes (no optional downgrade).
-7.  Run a principal-style self-review of the plan and refine it in the comment.
-8.  Before implementing, capture a concrete reproduction signal and record it in the workpad `Notes` section (command/output, screenshot, or deterministic UI behavior).
-9.  Run the `pull` skill to sync with latest `origin/main` before any code edits, then record the pull/sync result in the workpad `Notes`.
+7.  Add a `Test-first Evidence` section to the workpad that names the failing test, acceptance script, or executable validation that will prove the change.
+8.  Run a principal-style self-review of the plan and refine it in the comment.
+9.  Before implementing, capture a concrete reproduction signal and record it in the workpad `Notes` section (command/output, screenshot, or deterministic UI behavior).
+10. Run the `pull` skill to sync with latest `origin/main` before any code edits, then record the pull/sync result in the workpad `Notes`.
     - Include a `pull skill evidence` note with:
       - merge source(s),
       - result (`clean` or `conflicts resolved`),
       - resulting `HEAD` short SHA.
-10. Compact context and proceed to execution.
+11. Compact context and proceed to execution.
 
 ## PR feedback sweep protocol (required)
 

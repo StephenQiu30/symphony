@@ -395,8 +395,14 @@ defmodule SymphonyElixir.StatusDashboard do
   defp format_project_link_lines do
     project_part =
       case Config.settings!().tracker.project_slug do
-        project_slug when is_binary(project_slug) and project_slug != "" ->
-          colorize(linear_project_url(project_slug), @ansi_cyan)
+        project_slug when is_binary(project_slug) ->
+          project_slug = String.trim(project_slug)
+
+          if valid_project_slug?(project_slug) do
+            colorize(linear_project_url(project_slug), @ansi_cyan)
+          else
+            colorize("n/a", @ansi_gray)
+          end
 
         _ ->
           colorize("n/a", @ansi_gray)
@@ -412,6 +418,12 @@ defmodule SymphonyElixir.StatusDashboard do
         [project_line]
     end
   end
+
+  defp valid_project_slug?(project_slug) when is_binary(project_slug) do
+    project_slug != "" and not String.starts_with?(project_slug, "$")
+  end
+
+  defp valid_project_slug?(_project_slug), do: false
 
   defp format_project_refresh_line(%{checking?: true}) do
     colorize("│ Next refresh: ", @ansi_bold) <> colorize("checking now…", @ansi_cyan)

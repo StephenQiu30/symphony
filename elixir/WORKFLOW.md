@@ -12,6 +12,7 @@ tracker:
     - Cancelled
     - Canceled
     - Duplicate
+    - Blocked
     - Done
 polling:
   interval_ms: 5000
@@ -44,7 +45,7 @@ codex:
     type: dangerFullAccess
     networkAccess: true
 claude:
-  command: claude -p --dangerously-skip-permissions --output-format stream-json --include-partial-messages --verbose
+  command: claude -p --dangerously-skip-permissions --permission-mode bypassPermissions
 cursor:
   command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
 gemini:
@@ -94,6 +95,8 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:gemini` → Gemini CLI
 
 When no matching label is present, Symphony uses `agent.default_runtime` (codex by default in this workflow).
+
+`Blocked` is listed under `terminal_states` so Symphony stops dispatching once an agent moves an issue there; humans unblock by moving it back to `Todo` or `Rework`.
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 

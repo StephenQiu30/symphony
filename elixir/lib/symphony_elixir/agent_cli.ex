@@ -85,6 +85,7 @@ defmodule SymphonyElixir.AgentCli do
     command
     |> ensure_flag(~r/(^|\s)(-p|--print)(\s|$)/, "-p")
     |> ensure_flag(~r/(^|\s)--dangerously-skip-permissions(\s|$)/, "--dangerously-skip-permissions")
+    |> ensure_flag(~r/(^|\s)--permission-mode(\s|=)/, "--permission-mode bypassPermissions")
     |> ensure_claude_streaming_output()
     |> ensure_flag(~r/(^|\s)--verbose(\s|$)/, "--verbose")
   end

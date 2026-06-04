@@ -15,10 +15,11 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 
 1. Polls Linear for candidate work
 2. Creates a workspace per issue
-3. Launches Codex in [App Server mode](https://developers.openai.com/codex/app-server/) inside the
-   workspace
-4. Sends a workflow prompt to Codex
-5. Keeps Codex working on the issue until the work is done
+3. Launches the configured agent runtime inside the workspace:
+   - **Codex** via [App Server mode](https://developers.openai.com/codex/app-server/)
+   - **Claude Code** or **Cursor Agent** via headless CLI when selected by Linear label
+4. Sends a workflow prompt to the agent
+5. Keeps the agent working on the issue until the work is done
 
 During app-server sessions, Symphony also serves a client-side `linear_graphql` tool so that repo
 skills can make raw Linear GraphQL calls.
@@ -103,8 +104,17 @@ hooks:
 agent:
   max_concurrent_agents: 10
   max_turns: 20
+  default_runtime: codex
+  runtime_by_label:
+    agent:codex: codex
+    agent:claude: claude
+    agent:cursor: cursor
 codex:
   command: codex app-server
+claude:
+  command: claude -p --dangerously-skip-permissions
+cursor:
+  command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
 ---
 
 You are working on a Linear issue {{ issue.identifier }}.
@@ -127,8 +137,12 @@ Notes:
 - Workflows that run package managers or other commands that resolve external hosts should set
   `networkAccess: true` in `codex.turn_sandbox_policy`; otherwise DNS/network access may be denied
   by the Codex turn sandbox.
-- `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
+- `agent.max_turns` caps how many back-to-back agent turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- Multi-agent routing is configured in `WORKFLOW.md`:
+  - `agent.default_runtime` selects Codex when no label matches (`codex` by default).
+  - `agent.runtime_by_label` maps Linear labels such as `agent:cursor` to `codex`, `claude`, or `cursor`.
+  - `claude` and `cursor` blocks configure headless CLI commands; Codex continues to use `codex.*`.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run

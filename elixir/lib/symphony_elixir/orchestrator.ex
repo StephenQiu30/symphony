@@ -38,6 +38,7 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       blocked: %{},
       retry_attempts: %{},
+      pending_worker_updates: %{},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -162,18 +163,13 @@ defmodule SymphonyElixir.Orchestrator do
       ) do
     case Map.get(running, issue_id) do
       nil ->
-        {:noreply, state}
+        pending_worker_updates = Map.update(state.pending_worker_updates, issue_id, [update], &(&1 ++ [update]))
+        {:noreply, %{state | pending_worker_updates: pending_worker_updates}}
 
       running_entry ->
-        {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
-
-        state =
-          state
-          |> apply_codex_token_delta(token_delta)
-          |> apply_codex_rate_limits(update)
-
+        state = apply_codex_worker_update(state, issue_id, running_entry, update)
         notify_dashboard()
-        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+        {:noreply, state}
     end
   end
 
@@ -932,36 +928,36 @@ defmodule SymphonyElixir.Orchestrator do
 
         Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
 
-        running =
-          Map.put(state.running, issue.id, %{
-            pid: pid,
-            ref: ref,
-            identifier: issue.identifier,
-            issue: issue,
-            worker_host: worker_host,
-            workspace_path: nil,
-            session_id: nil,
-            last_codex_message: nil,
-            last_codex_timestamp: nil,
-            last_codex_event: nil,
-            codex_app_server_pid: nil,
-            codex_input_tokens: 0,
-            codex_output_tokens: 0,
-            codex_total_tokens: 0,
-            codex_last_reported_input_tokens: 0,
-            codex_last_reported_output_tokens: 0,
-            codex_last_reported_total_tokens: 0,
-            turn_count: 0,
-            retry_attempt: normalize_retry_attempt(attempt),
-            started_at: DateTime.utc_now()
-          })
+        running_entry = %{
+          pid: pid,
+          ref: ref,
+          identifier: issue.identifier,
+          issue: issue,
+          worker_host: worker_host,
+          workspace_path: nil,
+          session_id: nil,
+          last_codex_message: nil,
+          last_codex_timestamp: nil,
+          last_codex_event: nil,
+          codex_app_server_pid: nil,
+          codex_input_tokens: 0,
+          codex_output_tokens: 0,
+          codex_total_tokens: 0,
+          codex_last_reported_input_tokens: 0,
+          codex_last_reported_output_tokens: 0,
+          codex_last_reported_total_tokens: 0,
+          turn_count: 0,
+          retry_attempt: normalize_retry_attempt(attempt),
+          started_at: DateTime.utc_now()
+        }
 
         %{
           state
-          | running: running,
+          | running: Map.put(state.running, issue.id, running_entry),
             claimed: MapSet.put(state.claimed, issue.id),
             retry_attempts: Map.delete(state.retry_attempts, issue.id)
         }
+        |> apply_pending_worker_updates(issue.id)
 
       {:error, reason} ->
         Logger.error("Unable to spawn agent for #{issue_context(issue)}: #{inspect(reason)}")
@@ -1343,6 +1339,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @impl true
   def handle_call(:snapshot, _from, state) do
+    state = apply_pending_worker_updates(state)
     state = refresh_runtime_config(state)
     now = DateTime.utc_now()
     now_ms = System.monotonic_time(:millisecond)
@@ -1434,6 +1431,35 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp blocked_issue_state(%{issue: %Issue{state: state}}), do: state
   defp blocked_issue_state(_metadata), do: nil
+
+  defp apply_pending_worker_updates(%State{} = state) do
+    state.pending_worker_updates
+    |> Map.keys()
+    |> Enum.reduce(state, &apply_pending_worker_updates(&2, &1))
+  end
+
+  defp apply_pending_worker_updates(%State{} = state, issue_id) when is_binary(issue_id) do
+    case {Map.get(state.running, issue_id), Map.get(state.pending_worker_updates, issue_id, [])} do
+      {running_entry, updates} when is_map(running_entry) and updates != [] ->
+        state = %{state | pending_worker_updates: Map.delete(state.pending_worker_updates, issue_id)}
+
+        Enum.reduce(updates, state, fn update, updated_state ->
+          apply_codex_worker_update(updated_state, issue_id, Map.get(updated_state.running, issue_id), update)
+        end)
+
+      _ ->
+        state
+    end
+  end
+
+  defp apply_codex_worker_update(%State{} = state, issue_id, running_entry, update) when is_map(running_entry) do
+    {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
+
+    state
+    |> apply_codex_token_delta(token_delta)
+    |> apply_codex_rate_limits(update)
+    |> Map.update!(:running, &Map.put(&1, issue_id, updated_running_entry))
+  end
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
     token_delta = extract_token_delta(running_entry, update)
@@ -1712,20 +1738,33 @@ defmodule SymphonyElixir.Orchestrator do
   defp absolute_token_usage_from_payload(_payload), do: nil
 
   defp turn_completed_usage_from_payload(payload) when is_map(payload) do
-    method = Map.get(payload, "method") || Map.get(payload, :method)
-
-    if method in ["turn/completed", :turn_completed] do
-      direct =
-        Map.get(payload, "usage") ||
-          Map.get(payload, :usage) ||
-          map_at_path(payload, ["params", "usage"]) ||
-          map_at_path(payload, [:params, :usage])
-
-      if is_map(direct) and integer_token_map?(direct), do: direct
+    if token_usage_completion_event?(payload) do
+      payload
+      |> direct_usage_payload()
+      |> integer_token_payload()
     end
   end
 
   defp turn_completed_usage_from_payload(_payload), do: nil
+
+  defp token_usage_completion_event?(payload) do
+    method = Map.get(payload, "method") || Map.get(payload, :method)
+    type = Map.get(payload, "type") || Map.get(payload, :type)
+
+    method in ["turn/completed", :turn_completed] or
+      type in ["result", :result]
+  end
+
+  defp direct_usage_payload(payload) do
+    Map.get(payload, "usage") ||
+      Map.get(payload, :usage) ||
+      map_at_path(payload, ["params", "usage"]) ||
+      map_at_path(payload, [:params, :usage])
+  end
+
+  defp integer_token_payload(payload) do
+    if is_map(payload) and integer_token_map?(payload), do: payload
+  end
 
   defp rate_limits_from_payload(payload) when is_map(payload) do
     direct = Map.get(payload, "rate_limits") || Map.get(payload, :rate_limits)

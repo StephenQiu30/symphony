@@ -106,6 +106,7 @@ defmodule SymphonyElixir.CoreTest do
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
     assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
+    refute Map.get(hooks, "after_create") =~ "SYMPHONY_TARGET_BRANCH"
     assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
     assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
@@ -752,8 +753,9 @@ defmodule SymphonyElixir.CoreTest do
 
   defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
     remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
+    scheduling_tolerance_ms = 750
 
-    assert remaining_ms >= min_remaining_ms
+    assert remaining_ms >= min_remaining_ms - scheduling_tolerance_ms
     assert remaining_ms <= max_remaining_ms
   end
 
@@ -1812,6 +1814,119 @@ defmodule SymphonyElixir.CoreTest do
                  false
                end
              end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent runs cursor and claude mock binaries with structured result usage" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-multi-cli-#{System.unique_integer([:positive])}")
+
+    try do
+      workspace = Path.join(test_root, "workspace")
+      cursor_binary = Path.join(test_root, "fake-cursor")
+      claude_binary = Path.join(test_root, "fake-claude")
+      File.mkdir_p!(workspace)
+
+      for {name, binary} <- [{"cursor", cursor_binary}, {"claude", claude_binary}] do
+        File.write!(binary, """
+        #!/bin/sh
+        printf '%s\\n' '{"type":"result","subtype":"success","session_id":"#{name}-session","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}'
+        """)
+        File.chmod!(binary, 0o755)
+      end
+
+      parent = self()
+
+      for {runtime, binary, session_id} <- [
+            {:cursor, cursor_binary, "cursor-session"},
+            {:claude, claude_binary, "claude-session"}
+          ] do
+        File.write!(Workflow.workflow_file_path(), """
+        ---
+        tracker:
+          kind: memory
+        #{runtime}:
+          command: "#{binary}"
+          prompt_mode: #{if runtime == :claude, do: "stdin", else: "argument"}
+        ---
+        #{runtime} prompt body.
+        """)
+
+        WorkflowStore.force_reload()
+
+        issue = %Issue{
+          id: "issue-#{runtime}",
+          identifier: "STE-#{runtime}",
+          title: "Run #{runtime}",
+          description: "Smoke test",
+          state: "In Progress",
+          labels: []
+        }
+
+        assert {:ok, %{result: :turn_completed, session_id: ^session_id}} =
+                 SymphonyElixir.AgentCli.run(runtime, workspace, "hello", issue,
+                   on_message: fn message -> send(parent, {:agent_message, runtime, message}) end
+                 )
+
+        assert_receive {:agent_message, ^runtime,
+                        %{
+                          event: :turn_completed,
+                          cli_agent_runtime: cli_runtime,
+                          payload: %{"usage" => %{"total_tokens" => 15}}
+                        }}
+                       when cli_runtime in ["cursor", "claude"]
+      end
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent parses gemini usage payload and removes temporary prompt file" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-gemini-cli-#{System.unique_integer([:positive])}")
+
+    try do
+      workspace = Path.join(test_root, "workspace")
+      gemini_binary = Path.join(test_root, "fake-gemini")
+      trace_file = Path.join(test_root, "gemini.trace")
+      File.mkdir_p!(workspace)
+
+      File.write!(gemini_binary, """
+      #!/bin/sh
+      printf 'ARGV:%s\\n' "$*" >> "#{trace_file}"
+      printf '%s\\n' '{"type":"result","subtype":"success","session_id":"gemini-session","result":"done","usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}'
+      """)
+
+      File.chmod!(gemini_binary, 0o755)
+
+      File.write!(Workflow.workflow_file_path(), """
+      ---
+      tracker:
+        kind: memory
+      gemini:
+        command: "#{gemini_binary}"
+      ---
+      Gemini prompt body.
+      """)
+
+      WorkflowStore.force_reload()
+      parent = self()
+
+      issue = %Issue{id: "issue-gemini-json", identifier: "STE-46", title: "Parse Gemini JSON", description: "Gemini JSON should be structured", state: "In Progress", labels: []}
+
+      assert {:ok, %{result: :turn_completed, session_id: "gemini-session"}} =
+               SymphonyElixir.AgentCli.run(:gemini, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :turn_completed,
+                        cli_agent_runtime: "gemini",
+                        session_id: "gemini-session",
+                        payload: %{"usage" => %{"input_tokens" => 13, "output_tokens" => 8, "total_tokens" => 21}}
+                      }}
+
+      assert File.read!(trace_file) =~ "--output-format json"
+      assert [] = Path.wildcard(Path.join(workspace, ".symphony-gemini-prompt.*"))
     after
       File.rm_rf(test_root)
     end

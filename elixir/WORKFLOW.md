@@ -26,8 +26,13 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
+  default_runtime: codex
   max_concurrent_agents: 10
   max_turns: 20
+  runtime_by_label:
+    agent:codex: codex
+    agent:claude: claude
+    agent:cursor: cursor
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -35,6 +40,12 @@ codex:
   turn_sandbox_policy:
     type: workspaceWrite
     networkAccess: true
+claude:
+  command: claude -p --dangerously-skip-permissions --permission-mode bypassPermissions
+  prompt_mode: stdin
+cursor:
+  command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
+  prompt_mode: argument
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -69,6 +80,16 @@ Instructions:
 3. Final message must report completed actions and blockers only. Do not include "next steps for user".
 
 Work only in the provided repository copy. Do not touch any other path.
+
+## Agent runtime selection
+
+Symphony selects the agent runtime from Linear labels configured in `agent.runtime_by_label`:
+
+- `agent:codex` → Codex app-server
+- `agent:claude` → Claude CLI
+- `agent:cursor` → Cursor CLI
+
+When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 

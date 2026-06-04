@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, ConnectionSync, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -111,6 +111,7 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_info(:run_poll_cycle, state) do
     state = refresh_runtime_config(state)
     state = maybe_dispatch(state)
+    maybe_verify_connections()
     state = schedule_tick(state, state.poll_interval_ms)
     state = %{state | poll_check_in_progress: false}
 
@@ -291,6 +292,19 @@ defmodule SymphonyElixir.Orchestrator do
       false ->
         state
     end
+  end
+
+  defp maybe_verify_connections do
+    case ConnectionSync.verify_and_repair() do
+      %{phantom_cleaned: 0, mismatch_repaired: 0} ->
+        :ok
+
+      %{phantom_cleaned: phantom, mismatch_repaired: mismatch} ->
+        Logger.info("ConnectionSync: cleaned #{phantom} phantom, repaired #{mismatch} mismatched connections")
+    end
+  rescue
+    error ->
+      Logger.warning("ConnectionSync verification failed: #{inspect(error)}")
   end
 
   defp reconcile_running_issues(%State{} = state) do

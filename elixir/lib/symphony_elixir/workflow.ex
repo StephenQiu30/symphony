@@ -3,7 +3,7 @@ defmodule SymphonyElixir.Workflow do
   Loads workflow configuration and prompt from WORKFLOW.md.
   """
 
-  alias SymphonyElixir.{EnvFile, WorkflowStore}
+  alias SymphonyElixir.WorkflowStore
 
   @workflow_file_name "WORKFLOW.md"
 
@@ -51,8 +51,6 @@ defmodule SymphonyElixir.Workflow do
 
   @spec load(Path.t()) :: {:ok, loaded_workflow()} | {:error, term()}
   def load(path) when is_binary(path) do
-    EnvFile.load(path)
-
     case File.read(path) do
       {:ok, content} ->
         parse(content)

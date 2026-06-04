@@ -412,9 +412,6 @@ Fields:
 - `max_concurrent_agents` (integer)
   - Default: `10`
   - Changes SHOULD be re-applied at runtime and affect subsequent dispatch decisions.
-- `default_runtime` (`codex` | `claude` | `cursor`, optional)
-  - Selects the runtime used when no issue label override matches.
-  - When omitted, implementations SHOULD preserve legacy inference from configured runtime blocks.
 - `max_turns` (positive integer)
   - Default: `20`
   - Limits the number of coding-agent turns within one worker session.
@@ -426,11 +423,6 @@ Fields:
   - Default: empty map.
   - State keys are normalized (`lowercase`) for lookup.
   - Invalid entries (non-positive or non-numeric) are ignored.
-- `runtime_by_label` (map `label_name -> runtime`)
-  - Default: empty map.
-  - Label keys are normalized by trimming and lowercasing before lookup.
-  - The first issue label matching this map selects the runtime for that issue.
-  - Runtime values MUST be one of `codex`, `claude`, or `cursor`.
 
 #### 5.3.6 `codex` (object)
 
@@ -451,50 +443,16 @@ fields locally if they want stricter startup checks.
 - `approval_policy` (Codex `AskForApproval` value)
   - Default: implementation-defined.
 - `thread_sandbox` (Codex `SandboxMode` value)
-  - Default: `danger-full-access`.
+  - Default: implementation-defined.
 - `turn_sandbox_policy` (Codex `SandboxPolicy` value)
-  - Default: `{"type":"dangerFullAccess"}`.
+  - Default: implementation-defined.
 - `turn_timeout_ms` (integer)
   - Default: `3600000` (1 hour)
 - `read_timeout_ms` (integer)
-  - Default: `30000`
+  - Default: `5000`
 - `stall_timeout_ms` (integer)
   - Default: `300000` (5 minutes)
   - If `<= 0`, stall detection is disabled.
-
-#### 5.3.7 `claude` (object)
-
-Fields:
-
-- `command` (string shell command)
-  - Default: `claude -p --dangerously-skip-permissions`
-  - The runtime launches this command via `bash -lc` in the workspace directory.
-  - Implementations SHOULD force headless print mode, high-permission operation, and structured
-    streaming output when the configured command omits those flags.
-- `prompt_mode` (`stdin` | `argument`)
-  - Default: `stdin`.
-  - Controls whether Symphony sends the rendered prompt over standard input or as a shell argument.
-- `turn_timeout_ms` (integer)
-  - Default: `3600000` (1 hour)
-- `read_timeout_ms` (integer)
-  - Default: `5000`
-
-#### 5.3.8 `cursor` (object)
-
-Fields:
-
-- `command` (string shell command)
-  - Default: `cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps`
-  - The runtime launches this command via `bash -lc` in the workspace directory.
-  - Implementations SHOULD force headless print mode, high-permission operation, and structured
-    streaming output when the configured command omits those flags.
-- `prompt_mode` (`stdin` | `argument`)
-  - Default: `argument`.
-  - Controls whether Symphony sends the rendered prompt over standard input or as a shell argument.
-- `turn_timeout_ms` (integer)
-  - Default: `3600000` (1 hour)
-- `read_timeout_ms` (integer)
-  - Default: `5000`
 
 ### 5.4 Prompt Template Contract
 
@@ -626,26 +584,16 @@ not require recognizing or validating extension fields unless that extension is 
 - `hooks.before_remove`: shell script or null
 - `hooks.timeout_ms`: integer, default `60000`
 - `agent.max_concurrent_agents`: integer, default `10`
-- `agent.default_runtime`: `codex`, `claude`, or `cursor`, optional
 - `agent.max_turns`: integer, default `20`
 - `agent.max_retry_backoff_ms`: integer, default `300000` (5m)
 - `agent.max_concurrent_agents_by_state`: map of positive integers, default `{}`
-- `agent.runtime_by_label`: map of Linear label names to runtime names, default `{}`
 - `codex.command`: shell command string, default `codex app-server`
 - `codex.approval_policy`: Codex `AskForApproval` value, default implementation-defined
-- `codex.thread_sandbox`: Codex `SandboxMode` value, default `danger-full-access`
-- `codex.turn_sandbox_policy`: Codex `SandboxPolicy` value, default `{"type":"dangerFullAccess"}`
+- `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined
+- `codex.turn_sandbox_policy`: Codex `SandboxPolicy` value, default implementation-defined
 - `codex.turn_timeout_ms`: integer, default `3600000`
-- `codex.read_timeout_ms`: integer, default `30000`
+- `codex.read_timeout_ms`: integer, default `5000`
 - `codex.stall_timeout_ms`: integer, default `300000`
-- `claude.command`: shell command string, default `claude -p --dangerously-skip-permissions`
-- `claude.prompt_mode`: `stdin` or `argument`, default `stdin`
-- `claude.turn_timeout_ms`: integer, default `3600000`
-- `claude.read_timeout_ms`: integer, default `5000`
-- `cursor.command`: shell command string for the Cursor CLI headless runtime
-- `cursor.prompt_mode`: `stdin` or `argument`, default `argument`
-- `cursor.turn_timeout_ms`: integer, default `3600000`
-- `cursor.read_timeout_ms`: integer, default `5000`
 
 ## 7. Orchestration State Machine
 
@@ -1054,34 +1002,6 @@ include:
 - `codex_app_server_pid` (if available)
 - OPTIONAL `usage` map (token counts)
 - payload fields as needed
-
-### 10.8 CLI Runtime Adapter Responsibilities
-
-Claude Code and Cursor Agent are integrated as CLI runtimes rather than Codex app-server clients.
-They still share Symphony's workspace, prompt, continuation, retry, stall detection, and
-observability responsibilities.
-
-Launch requirements:
-
-- Start the configured CLI command in the per-issue workspace.
-- Use `bash -lc <command>` and the configured `prompt_mode`.
-- Force non-interactive print/headless mode and high-permission execution when omitted by the
-  configured command.
-- Prefer structured streaming output (`stream-json`) so Symphony can display progress and extract
-  final usage metadata.
-
-Turn processing requirements:
-
-- Emit a `session_started` event before running the CLI process.
-- Forward each parsed JSON line as a structured `notification`; forward non-JSON lines as text
-  notifications.
-- Extract the CLI-provided session id from stream payloads when available.
-- Treat a successful result payload and zero exit status as `turn_completed`.
-- Treat result payloads marked as errors, non-zero exits, and timeouts as failed turns.
-- Forward final `usage` from result payloads so orchestrator token totals and dashboards work for
-  Claude/Cursor in the same way as Codex token totals.
-- If the issue remains active after a successful CLI turn, the worker SHOULD start another CLI turn
-  using Symphony continuation guidance, subject to `agent.max_turns`.
 
 Important emitted events include, for example:
 

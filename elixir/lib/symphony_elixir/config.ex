@@ -61,54 +61,6 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
-  @spec agent_runtime() :: :codex | :claude | :cursor | :gemini
-  @spec agent_runtime(term()) :: :codex | :claude | :cursor | :gemini
-  def agent_runtime(issue \\ nil) do
-    settings = settings!()
-
-    issue
-    |> issue_label_runtime(settings)
-    |> case do
-      nil -> default_agent_runtime(settings)
-      runtime -> runtime
-    end
-  end
-
-  defp issue_label_runtime(nil, _settings), do: nil
-
-  defp issue_label_runtime(%{labels: labels}, settings) when is_list(labels) do
-    label_map = settings.agent.runtime_by_label || %{}
-
-    labels
-    |> Enum.map(&Schema.normalize_label/1)
-    |> Enum.find_value(fn label ->
-      case Map.get(label_map, label) do
-        "codex" -> :codex
-        "claude" -> :claude
-        "cursor" -> :cursor
-        "gemini" -> :gemini
-        _ -> nil
-      end
-    end)
-  end
-
-  defp issue_label_runtime(_issue, _settings), do: nil
-
-  defp default_agent_runtime(settings) do
-    case settings.agent.default_runtime do
-      "codex" -> :codex
-      "claude" -> :claude
-      "cursor" -> :cursor
-      "gemini" -> :gemini
-      _ -> :codex
-    end
-  end
-
-  @spec cli_agent_settings(:claude | :cursor | :gemini) :: map()
-  def cli_agent_settings(:claude), do: settings!().claude
-  def cli_agent_settings(:cursor), do: settings!().cursor
-  def cli_agent_settings(:gemini), do: settings!().gemini
-
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
   def codex_turn_sandbox_policy(workspace \\ nil) do
     case Schema.resolve_runtime_turn_sandbox_policy(settings!(), workspace) do
@@ -149,12 +101,6 @@ defmodule SymphonyElixir.Config do
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
   def codex_runtime_settings(workspace \\ nil, opts \\ []) do
-    agent_app_server_settings(:codex, workspace, opts)
-  end
-
-  @spec agent_app_server_settings(:codex, Path.t() | nil, keyword()) ::
-          {:ok, codex_runtime_settings()} | {:error, term()}
-  def agent_app_server_settings(:codex, workspace \\ nil, opts \\ []) do
     with {:ok, settings} <- settings() do
       with {:ok, turn_sandbox_policy} <-
              Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts) do

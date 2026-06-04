@@ -327,7 +327,7 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
-  test "app server fails when command execution approval is required by policy" do
+  test "app server fails when command execution approval is required under safer defaults" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -368,8 +368,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_approval_policy: "on-request"
+        codex_command: "#{codex_binary} app-server"
       )
 
       issue = %Issue{
@@ -1432,7 +1431,14 @@ defmodule SymphonyElixir.AppServerTest do
       assert argv_line =~ "exec "
       assert argv_line =~ "fake-remote-codex app-server"
 
-      expected_turn_policy = %{"type" => "dangerFullAccess"}
+      expected_turn_policy = %{
+        "type" => "workspaceWrite",
+        "writableRoots" => [remote_workspace],
+        "readOnlyAccess" => %{"type" => "fullAccess"},
+        "networkAccess" => false,
+        "excludeTmpdirEnvVar" => false,
+        "excludeSlashTmp" => false
+      }
 
       assert Enum.any?(lines, fn line ->
                if String.starts_with?(line, "JSON:") do

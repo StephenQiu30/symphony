@@ -105,8 +105,7 @@ defmodule SymphonyElixir.CoreTest do
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 \"$SOURCE_REPO_URL\" ."
-    refute Map.get(hooks, "after_create") =~ "SYMPHONY_TARGET_BRANCH"
+    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
     assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
     assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
@@ -114,48 +113,6 @@ defmodule SymphonyElixir.CoreTest do
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
     assert Config.workflow_prompt() == prompt
-  end
-
-  test "env file supplies workflow settings without branch checkout support" do
-    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-env-file-#{System.unique_integer([:positive])}")
-    workflow_path = Path.join(test_root, "WORKFLOW.md")
-    env_path = Path.join(test_root, ".env")
-
-    previous_project_slug = System.get_env("SYMPHONY_LINEAR_PROJECT_SLUG")
-    previous_workspace_root = System.get_env("SYMPHONY_WORKSPACE_ROOT")
-
-    on_exit(fn ->
-      restore_env("SYMPHONY_LINEAR_PROJECT_SLUG", previous_project_slug)
-      restore_env("SYMPHONY_WORKSPACE_ROOT", previous_workspace_root)
-      File.rm_rf(test_root)
-    end)
-
-    File.mkdir_p!(test_root)
-    System.delete_env("SYMPHONY_LINEAR_PROJECT_SLUG")
-    System.delete_env("SYMPHONY_WORKSPACE_ROOT")
-
-    File.write!(env_path, """
-    SYMPHONY_LINEAR_PROJECT_SLUG=env-project
-    SYMPHONY_WORKSPACE_ROOT=#{Path.join(test_root, "workspaces")}
-    """)
-
-    File.write!(workflow_path, """
-    ---
-    tracker:
-      kind: linear
-      project_slug: "$SYMPHONY_LINEAR_PROJECT_SLUG"
-    workspace:
-      root: "$SYMPHONY_WORKSPACE_ROOT"
-    hooks:
-      after_create: |
-        git clone --depth 1 "$SOURCE_REPO_URL" .
-    ---
-    Env prompt.
-    """)
-
-    Workflow.set_workflow_file_path(workflow_path)
-    assert Config.settings!().tracker.project_slug == "env-project"
-    assert Config.settings!().workspace.root == Path.join(test_root, "workspaces")
   end
 
   test "linear api token resolves from LINEAR_API_KEY env var" do
@@ -795,9 +752,8 @@ defmodule SymphonyElixir.CoreTest do
 
   defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
     remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
-    scheduling_tolerance_ms = 750
 
-    assert remaining_ms >= min_remaining_ms - scheduling_tolerance_ms
+    assert remaining_ms >= min_remaining_ms
     assert remaining_ms <= max_remaining_ms
   end
 
@@ -1856,56 +1812,6 @@ defmodule SymphonyElixir.CoreTest do
                  false
                end
              end)
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "cli agent parses gemini usage payload and removes temporary prompt file" do
-    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-gemini-cli-#{System.unique_integer([:positive])}")
-
-    try do
-      workspace = Path.join(test_root, "workspace")
-      gemini_binary = Path.join(test_root, "fake-gemini")
-      trace_file = Path.join(test_root, "gemini.trace")
-      File.mkdir_p!(workspace)
-
-      File.write!(gemini_binary, """
-      #!/bin/sh
-      printf 'ARGV:%s\\n' "$*" >> "#{trace_file}"
-      printf '%s\\n' '{"type":"result","subtype":"success","session_id":"gemini-session","result":"done","usage":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}'
-      """)
-
-      File.chmod!(gemini_binary, 0o755)
-
-      File.write!(Workflow.workflow_file_path(), """
-      ---
-      tracker:
-        kind: memory
-      gemini:
-        command: "#{gemini_binary}"
-      ---
-      Gemini prompt body.
-      """)
-
-      WorkflowStore.force_reload()
-      parent = self()
-
-      issue = %Issue{id: "issue-gemini-json", identifier: "STE-46", title: "Parse Gemini JSON", description: "Gemini JSON should be structured", state: "In Progress", labels: []}
-
-      assert {:ok, %{result: :turn_completed, session_id: "gemini-session"}} =
-               SymphonyElixir.AgentCli.run(:gemini, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
-
-      assert_receive {:agent_message,
-                      %{
-                        event: :turn_completed,
-                        cli_agent_runtime: "gemini",
-                        session_id: "gemini-session",
-                        payload: %{"usage" => %{"input_tokens" => 13, "output_tokens" => 8, "total_tokens" => 21}}
-                      }}
-
-      assert File.read!(trace_file) =~ "--output-format json"
-      assert [] = Path.wildcard(Path.join(workspace, ".symphony-gemini-prompt.*"))
     after
       File.rm_rf(test_root)
     end

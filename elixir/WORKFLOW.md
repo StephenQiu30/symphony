@@ -1,7 +1,7 @@
 ---
 tracker:
   kind: linear
-  project_slug: "$SYMPHONY_LINEAR_PROJECT_SLUG"
+  project_slug: "symphony-0c79b11b75ea"
   active_states:
     - Todo
     - In Progress
@@ -12,44 +12,29 @@ tracker:
     - Cancelled
     - Canceled
     - Duplicate
-    - Blocked
     - Done
 polling:
   interval_ms: 5000
-server:
-  host: "$SYMPHONY_SERVER_HOST"
 workspace:
-  root: "$SYMPHONY_WORKSPACE_ROOT"
+  root: ~/code/symphony-workspaces
 hooks:
   after_create: |
-    git clone --depth 1 "$SOURCE_REPO_URL" .
+    git clone --depth 1 https://github.com/openai/symphony .
     if command -v mise >/dev/null 2>&1; then
       cd elixir && mise trust && mise exec -- mix deps.get
     fi
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  default_runtime: codex
   max_concurrent_agents: 10
   max_turns: 20
-  runtime_by_label:
-    agent:codex: codex
-    agent:claude: claude
-    agent:cursor: cursor
-    agent:gemini: gemini
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
-  thread_sandbox: danger-full-access
+  thread_sandbox: workspace-write
   turn_sandbox_policy:
-    type: dangerFullAccess
+    type: workspaceWrite
     networkAccess: true
-claude:
-  command: claude -p --dangerously-skip-permissions --permission-mode bypassPermissions
-cursor:
-  command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
-gemini:
-  command: gemini -p --output-format json
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -84,19 +69,6 @@ Instructions:
 3. Final message must report completed actions and blockers only. Do not include "next steps for user".
 
 Work only in the provided repository copy. Do not touch any other path.
-
-## Agent runtime selection
-
-Symphony selects the agent runtime from Linear labels configured in `agent.runtime_by_label`:
-
-- `agent:codex` → Codex app-server
-- `agent:claude` → Claude CLI
-- `agent:cursor` → Cursor CLI
-- `agent:gemini` → Gemini CLI
-
-When no matching label is present, Symphony uses `agent.default_runtime` (codex by default in this workflow).
-
-`Blocked` is listed under `terminal_states` so Symphony stops dispatching once an agent moves an issue there; humans unblock by moving it back to `Todo` or `Rework`.
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 

@@ -7,6 +7,7 @@ defmodule SymphonyElixir.CLI do
 
   @acknowledgement_switch :i_understand_that_this_will_be_running_without_the_usual_guardrails
   @switches [{@acknowledgement_switch, :boolean}, logs_root: :string, port: :integer]
+  @dotenv_key_pattern ~r/^[A-Za-z_][A-Za-z0-9_]*$/
 
   @type ensure_started_result :: {:ok, [atom()]} | {:error, term()}
   @type deps :: %{
@@ -56,6 +57,7 @@ defmodule SymphonyElixir.CLI do
     expanded_path = Path.expand(workflow_path)
 
     if deps.file_regular?.(expanded_path) do
+      :ok = load_workflow_dotenv(expanded_path)
       :ok = deps.set_workflow_file_path.(expanded_path)
 
       case deps.ensure_all_started.() do
@@ -69,6 +71,83 @@ defmodule SymphonyElixir.CLI do
       {:error, "Workflow file not found: #{expanded_path}"}
     end
   end
+
+  defp load_workflow_dotenv(workflow_path) do
+    workflow_path
+    |> Path.dirname()
+    |> Path.join(".env")
+    |> load_dotenv_file()
+  end
+
+  defp load_dotenv_file(dotenv_path) do
+    case File.read(dotenv_path) do
+      {:ok, contents} ->
+        contents
+        |> String.split(~r/\R/, trim: false)
+        |> Enum.each(&load_dotenv_line/1)
+
+        :ok
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  defp load_dotenv_line(line) do
+    line = String.trim(line)
+
+    cond do
+      line == "" or String.starts_with?(line, "#") ->
+        :ok
+
+      true ->
+        line = String.replace_prefix(line, "export ", "")
+
+        case String.split(line, "=", parts: 2) do
+          [key, value] -> maybe_put_dotenv_var(String.trim(key), normalize_dotenv_value(value))
+          _other -> :ok
+        end
+    end
+  end
+
+  defp normalize_dotenv_value(value) do
+    value = String.trim(value)
+
+    cond do
+      String.length(value) >= 2 and String.starts_with?(value, "'") and String.ends_with?(value, "'") ->
+        value
+        |> String.trim_leading("'")
+        |> String.trim_trailing("'")
+
+      String.length(value) >= 2 and String.starts_with?(value, "\"") and String.ends_with?(value, "\"") ->
+        value
+        |> String.trim_leading("\"")
+        |> String.trim_trailing("\"")
+
+      true ->
+        value
+    end
+  end
+
+  defp maybe_put_dotenv_var(key, value) do
+    cond do
+      not Regex.match?(@dotenv_key_pattern, key) ->
+        :ok
+
+      value == "" ->
+        :ok
+
+      present_env?(System.get_env(key)) ->
+        :ok
+
+      true ->
+        System.put_env(key, value)
+    end
+  end
+
+  defp present_env?(nil), do: false
+  defp present_env?(""), do: false
+  defp present_env?(_value), do: true
 
   @spec usage_message() :: String.t()
   defp usage_message do

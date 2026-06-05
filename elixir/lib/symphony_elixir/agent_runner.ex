@@ -128,16 +128,12 @@ defmodule SymphonyElixir.AgentRunner do
 
       case continue_with_issue?(issue, issue_state_fetcher) do
         {:continue, refreshed_issue} when turn_number < max_turns ->
-          Logger.info(
-            "Continuing #{runtime} agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}"
-          )
+          Logger.info("Continuing #{runtime} agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
           do_run_cli_agent_turns(runtime, workspace, refreshed_issue, codex_update_recipient, opts, worker_host, issue_state_fetcher, turn_number + 1, max_turns)
 
         {:continue, refreshed_issue} ->
-          Logger.info(
-            "Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator"
-          )
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
 
           :ok
 
@@ -170,15 +166,11 @@ defmodule SymphonyElixir.AgentRunner do
              issue,
              on_message: codex_message_handler(codex_update_recipient, issue)
            ) do
-      Logger.info(
-        "Completed #{runtime} app-server agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}"
-      )
+      Logger.info("Completed #{runtime} app-server agent run for #{issue_context(issue)} session_id=#{turn_session[:session_id]} workspace=#{workspace} turn=#{turn_number}/#{max_turns}")
 
       case continue_with_issue?(issue, issue_state_fetcher) do
         {:continue, refreshed_issue} when turn_number < max_turns ->
-          Logger.info(
-            "Continuing #{runtime} app-server agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}"
-          )
+          Logger.info("Continuing #{runtime} app-server agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
           do_run_app_server_agent_turns(
             runtime,
@@ -193,9 +185,7 @@ defmodule SymphonyElixir.AgentRunner do
           )
 
         {:continue, refreshed_issue} ->
-          Logger.info(
-            "Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator"
-          )
+          Logger.info("Reached agent.max_turns for #{issue_context(refreshed_issue)} with issue still active; returning control to orchestrator")
 
           :ok
 
@@ -280,6 +270,10 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp validate_cli_runtime_command(runtime) when runtime in [:claude, :cursor, :gemini] do
+    validate_cli_runtime_command_exists(runtime)
+  end
+
+  defp validate_cli_runtime_command_exists(runtime) when runtime in [:claude, :cursor, :gemini] do
     case Config.cli_agent_settings(runtime).command do
       command when is_binary(command) and command != "" ->
         :ok

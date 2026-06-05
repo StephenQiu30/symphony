@@ -4,7 +4,6 @@ defmodule SymphonyElixir.AgentCli do
   require Logger
   alias SymphonyElixir.{Config, SSH}
 
-  @port_line_bytes 1_048_576
   @type runtime :: :claude | :cursor | :gemini
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -45,8 +44,7 @@ defmodule SymphonyElixir.AgentCli do
             :exit_status,
             :stderr_to_stdout,
             args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt))],
-            cd: String.to_charlist(workspace),
-            line: @port_line_bytes
+            cd: String.to_charlist(workspace)
           ])
 
         {:ok, port}
@@ -54,7 +52,7 @@ defmodule SymphonyElixir.AgentCli do
   end
 
   defp start_port(runtime, workspace, prompt, worker_host) when is_binary(worker_host) do
-    SSH.start_port(worker_host, shell_script(runtime, workspace, prompt), line: @port_line_bytes)
+    SSH.start_port(worker_host, shell_script(runtime, workspace, prompt))
   end
 
   defp shell_script(runtime, workspace, prompt) do
@@ -71,6 +69,10 @@ defmodule SymphonyElixir.AgentCli do
       launch_command(runtime, settings)
     ]
     |> Enum.join("\n")
+  end
+
+  defp launch_command(:gemini, %{command: command}) do
+    "#{headless_command(:gemini, command)} -p \"$(cat \"$prompt_file\")\""
   end
 
   defp launch_command(runtime, %{command: command, prompt_mode: "argument"}) do
@@ -102,8 +104,9 @@ defmodule SymphonyElixir.AgentCli do
 
   defp headless_command(:gemini, command) do
     command
-    |> ensure_flag(~r/(^|\s)(-p|--prompt)(\s|$)/, "-p")
-    |> ensure_json_output("json")
+    |> ensure_flag(~r/(^|\s)--skip-trust(\s|$)/, "--skip-trust")
+    |> ensure_flag(~r/(^|\s)(--approval-mode(\s|=)|--yolo(\s|$)|-y(\s|$))/, "--approval-mode yolo")
+    |> ensure_json_output("stream-json")
   end
 
   defp ensure_flag(command, pattern, flag) do
@@ -137,12 +140,31 @@ defmodule SymphonyElixir.AgentCli do
 
   defp receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line, state) do
     receive do
+      {^port, {:data, chunk}} when is_binary(chunk) ->
+        case process_cli_chunk(runtime, on_message, metadata, pending_line, chunk, state) do
+          {:ok, pending_line, state} ->
+            receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line, state)
+
+          {:error, reason, state} ->
+            emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: reason}, metadata)
+            {:error, reason}
+        end
+
       {^port, {:data, {:eol, chunk}}} ->
         state = emit_cli_line(on_message, pending_line <> to_string(chunk), metadata, state)
         receive_loop(runtime, port, on_message, metadata, timeout_ms, "", state)
 
       {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line <> to_string(chunk), state)
+        pending_line = pending_line <> to_string(chunk)
+
+        case interactive_prompt_reason(runtime, pending_line) do
+          nil ->
+            receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line, state)
+
+          reason ->
+            emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: reason}, metadata)
+            {:error, reason}
+        end
 
       {^port, {:exit_status, 0}} ->
         state = if pending_line == "", do: state, else: emit_cli_line(on_message, pending_line, metadata, state)
@@ -167,8 +189,28 @@ defmodule SymphonyElixir.AgentCli do
     end
   end
 
+  defp process_cli_chunk(runtime, on_message, metadata, pending_line, chunk, state) do
+    buffer = pending_line <> to_string(chunk)
+
+    case interactive_prompt_reason(runtime, buffer) do
+      nil ->
+        {lines, pending_line} = pop_complete_lines(buffer)
+        state = Enum.reduce(lines, state, &emit_cli_line(on_message, &1, metadata, &2))
+        {:ok, pending_line, state}
+
+      reason ->
+        {:error, reason, state}
+    end
+  end
+
   defp drain_available_port_output(port, on_message, metadata, pending_line, state) do
     receive do
+      {^port, {:data, chunk}} when is_binary(chunk) ->
+        case process_cli_chunk(:unknown, on_message, metadata, pending_line, chunk, state) do
+          {:ok, pending_line, state} -> drain_available_port_output(port, on_message, metadata, pending_line, state)
+          {:error, _reason, state} -> {pending_line, state}
+        end
+
       {^port, {:data, {:eol, chunk}}} ->
         line = pending_line <> to_string(chunk)
         state = emit_cli_line(on_message, line, metadata, state)
@@ -189,6 +231,26 @@ defmodule SymphonyElixir.AgentCli do
       state
     end
   end
+
+  defp pop_complete_lines(buffer) do
+    parts = String.split(buffer, "\n", trim: false)
+    pending_line = List.last(parts) || ""
+
+    lines =
+      parts
+      |> Enum.drop(-1)
+      |> Enum.map(&String.trim_trailing(&1, "\r"))
+
+    {lines, pending_line}
+  end
+
+  defp interactive_prompt_reason(:gemini, output) do
+    if String.contains?(output, "Opening authentication page in your browser") or String.contains?(output, "Do you want to continue? [Y/n]") do
+      {:cli_agent_interactive_prompt, :gemini, :authentication}
+    end
+  end
+
+  defp interactive_prompt_reason(_runtime, _output), do: nil
 
   defp complete_cli_turn(runtime, on_message, metadata, %{failed_payload: failed_payload} = state) when is_map(failed_payload) do
     reason = {:cli_agent_failed, runtime, failed_payload}
@@ -234,6 +296,7 @@ defmodule SymphonyElixir.AgentCli do
 
   defp maybe_record_cli_result(state, payload) do
     if map_value(payload, ["type", :type]) == "result" do
+      payload = normalize_result_payload(payload)
       state = %{state | result_payload: payload}
       subtype = map_value(payload, ["subtype", :subtype])
       is_error = map_value(payload, ["is_error", :is_error])
@@ -245,6 +308,13 @@ defmodule SymphonyElixir.AgentCli do
       end
     else
       state
+    end
+  end
+
+  defp normalize_result_payload(payload) when is_map(payload) do
+    case {Map.get(payload, "usage"), Map.get(payload, "stats")} do
+      {nil, stats} when is_map(stats) -> Map.put(payload, "usage", stats)
+      _ -> payload
     end
   end
 

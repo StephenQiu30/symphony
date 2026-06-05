@@ -33,6 +33,7 @@ agent:
     agent:codex: codex
     agent:claude: claude
     agent:cursor: cursor
+    agent:gemini: gemini
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -46,6 +47,8 @@ claude:
 cursor:
   command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
   prompt_mode: argument
+gemini:
+  command: gemini --skip-trust --approval-mode yolo
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -88,12 +91,13 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:codex` → Codex app-server
 - `agent:claude` → Claude CLI
 - `agent:cursor` → Cursor CLI
+- `agent:gemini` → Gemini CLI
 
 When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
 
-## Prerequisite: Linear MCP or `linear_graphql` tool is available
+## Prerequisite: Linear access is available
 
-The agent should be able to talk to Linear, either via a configured Linear MCP server or injected `linear_graphql` tool. If none are present, stop and ask the user to configure Linear.
+The agent should be able to talk to Linear, either via a configured Linear MCP server, an injected `linear_graphql` tool, or the `LINEAR_API_KEY` environment variable with direct GraphQL HTTP requests to `https://api.linear.app/graphql`. If none are present, record the missing Linear access in the workpad and move the issue to `Blocked`.
 
 ## Default posture
 

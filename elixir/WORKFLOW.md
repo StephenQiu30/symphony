@@ -95,6 +95,24 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 
 When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
 
+### Gemini vs Antigravity
+
+The `gemini.command` setting is for the Gemini CLI headless `stream-json`
+protocol. It does not automatically use Antigravity just because
+`~/.gemini/antigravity` exists. If this project should run through
+Antigravity, first verify a healthy Antigravity Agent API session from the same
+shell:
+
+```sh
+ANTIGRAVITY_LS_ADDRESS=127.0.0.1:<grpc-port> \
+  ~/.gemini/antigravity/bin/agentapi new-conversation --model=flash "health check"
+```
+
+If that command reports missing CSRF token, model fetch failure, or
+`state syncing error: key not found`, the Antigravity login/session is not
+usable by Symphony yet. Do not start unattended Symphony retries in that state;
+fix Antigravity auth first or keep using the Gemini CLI command above.
+
 ## Prerequisite: Linear access is available
 
 The agent should be able to talk to Linear, either via a configured Linear MCP server, an injected `linear_graphql` tool, or the `LINEAR_API_KEY` environment variable with direct GraphQL HTTP requests to `https://api.linear.app/graphql`. If none are present, record the missing Linear access in the workpad and move the issue to `Blocked`.

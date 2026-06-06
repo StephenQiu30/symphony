@@ -120,6 +120,13 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 
 Allowed commit types are fixed: `test:`, `docs:`, `impl:`, `chore:`, `feat:`, and `refactor:`.
 
+- New work branches must use ASCII slug names with an intent prefix, such as
+  `feature/ste-123-short-topic`, `fix/ste-123-short-topic`,
+  `chore/ste-123-short-topic`, `docs/ste-123-short-topic`, or
+  `refactor/ste-123-short-topic`; never create branches containing Chinese or
+  other non-ASCII characters.
+- Derive branch slugs from the issue identifier plus a short English topic; keep
+  Chinese issue titles for PR titles, commit messages, and workpad notes only.
 - Use `test:` for failing tests, fixtures, mocks, acceptance scripts, and test-only expectations.
 - Use `impl:` for the smallest implementation that makes existing red tests pass.
 - Use `feat:` for user-visible capability or behavior changes, backed by prior `test:` evidence unless explicitly documented as not scriptable.

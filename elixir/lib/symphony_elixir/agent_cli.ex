@@ -8,14 +8,13 @@ defmodule SymphonyElixir.AgentCli do
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :gemini] do
-    worker_host = Keyword.get(opts, :worker_host)
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
     metadata = %{cli_agent_runtime: to_string(runtime), cli_agent_session_id: session_id}
 
     Logger.info("#{runtime} CLI session started for #{issue_context(issue)} session_id=#{session_id}")
 
-    case start_port(runtime, workspace, prompt, worker_host) do
+    case start_port(runtime, workspace, prompt, opts) do
       {:ok, port} ->
         metadata = Map.merge(metadata, port_metadata(port))
         emit_message(on_message, :session_started, %{session_id: session_id, thread_id: session_id, turn_id: "turn-1"}, metadata)
@@ -32,31 +31,34 @@ defmodule SymphonyElixir.AgentCli do
     end
   end
 
-  defp start_port(runtime, workspace, prompt, nil) do
-    case System.find_executable("bash") do
-      nil ->
-        {:error, :bash_not_found}
+  defp start_port(runtime, workspace, prompt, opts) do
+    worker_host = Keyword.get(opts, :worker_host)
 
-      executable ->
-        port =
-          Port.open({:spawn_executable, String.to_charlist(executable)}, [
-            :binary,
-            :exit_status,
-            :stderr_to_stdout,
-            args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt))],
-            cd: String.to_charlist(workspace)
-          ])
+    if is_binary(worker_host) do
+      SSH.start_port(worker_host, shell_script(runtime, workspace, prompt, opts))
+    else
+      case System.find_executable("bash") do
+        nil ->
+          {:error, :bash_not_found}
 
-        {:ok, port}
+        executable ->
+          port =
+            Port.open({:spawn_executable, String.to_charlist(executable)}, [
+              :binary,
+              :exit_status,
+              :stderr_to_stdout,
+              args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt, opts))],
+              cd: String.to_charlist(workspace)
+            ])
+
+          {:ok, port}
+      end
     end
   end
 
-  defp start_port(runtime, workspace, prompt, worker_host) when is_binary(worker_host) do
-    SSH.start_port(worker_host, shell_script(runtime, workspace, prompt))
-  end
-
-  defp shell_script(runtime, workspace, prompt) do
-    settings = Config.cli_agent_settings(runtime)
+  defp shell_script(runtime, workspace, prompt, opts) do
+    settings = Config.runtime_settings(runtime)
+    model = Keyword.get(opts, :model)
 
     [
       "set -eu",
@@ -66,20 +68,23 @@ defmodule SymphonyElixir.AgentCli do
       "base64 -d > \"$prompt_file\" <<'__SYMPHONY_AGENT_PROMPT__'",
       Base.encode64(prompt),
       "__SYMPHONY_AGENT_PROMPT__",
-      launch_command(runtime, settings)
+      launch_command(runtime, settings, model)
     ]
     |> Enum.join("\n")
   end
 
-  defp launch_command(:gemini, %{command: command}) do
+  defp launch_command(:gemini, %{command: command}, model) do
+    command = if model, do: "#{command} --model=#{model}", else: command
     "#{headless_command(:gemini, command)} -p \"$(cat \"$prompt_file\")\""
   end
 
-  defp launch_command(runtime, %{command: command, prompt_mode: "argument"}) do
+  defp launch_command(runtime, %{command: command, prompt_mode: "argument"}, model) do
+    command = if model, do: "#{command} --model=#{model}", else: command
     "#{headless_command(runtime, command)} \"$(cat \"$prompt_file\")\""
   end
 
-  defp launch_command(runtime, %{command: command}) do
+  defp launch_command(runtime, %{command: command}, model) do
+    command = if model, do: "#{command} --model=#{model}", else: command
     "#{headless_command(runtime, command)} < \"$prompt_file\""
   end
 
@@ -131,7 +136,7 @@ defmodule SymphonyElixir.AgentCli do
   end
 
   defp await_completion(runtime, port, on_message, session_id, metadata) do
-    receive_loop(runtime, port, on_message, metadata, Config.cli_agent_settings(runtime).turn_timeout_ms, "", %{
+    receive_loop(runtime, port, on_message, metadata, Config.runtime_settings(runtime).turn_timeout_ms, "", %{
       failed_payload: nil,
       result_payload: nil,
       session_id: session_id

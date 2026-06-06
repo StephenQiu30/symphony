@@ -2,7 +2,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
   use SymphonyElixir.TestSupport
   alias Ecto.Changeset
   alias SymphonyElixir.Config.Schema
-  alias SymphonyElixir.Config.Schema.{Codex, StringOrMap}
+  alias SymphonyElixir.Config.Schema.{AgentRuntime, StringOrMap}
   alias SymphonyElixir.Linear.Client
 
   test "workspace bootstrap can be implemented in after_create hook" do
@@ -998,7 +998,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :claude
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:cursor"]}) == :cursor
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:gemini"]}) == :gemini
-    assert Config.cli_agent_settings(:gemini).command == "gemini"
+    assert Config.runtime_settings(:gemini).command == "gemini"
     assert :ok = Config.validate!()
   end
 
@@ -1017,7 +1017,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     File.write!(Workflow.workflow_file_path(), workflow)
     WorkflowStore.force_reload()
 
-    assert {:error, {:missing_cli_runtime_command, :claude}} = Config.validate!()
+    assert {:error, {:missing_runtime_command, :claude}} = Config.validate!()
   end
 
   test "schema helpers cover custom type and state limit validation" do
@@ -1104,12 +1104,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     explicit_policy = %{"type" => "workspaceWrite", "writableRoots" => ["/tmp/explicit"]}
 
     assert Schema.resolve_turn_sandbox_policy(%Schema{
-             codex: %Codex{turn_sandbox_policy: explicit_policy},
+             codex: %AgentRuntime{turn_sandbox_policy: explicit_policy},
              workspace: %Schema.Workspace{root: "/tmp/ignored"}
            }) == explicit_policy
 
     assert Schema.resolve_turn_sandbox_policy(%Schema{
-             codex: %Codex{turn_sandbox_policy: nil},
+             codex: %AgentRuntime{turn_sandbox_policy: nil},
              workspace: %Schema.Workspace{root: ""}
            }) == %{
              "type" => "workspaceWrite",
@@ -1122,7 +1122,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Schema.resolve_turn_sandbox_policy(
              %Schema{
-               codex: %Codex{turn_sandbox_policy: nil},
+               codex: %AgentRuntime{turn_sandbox_policy: nil},
                workspace: %Schema.Workspace{root: "/tmp/ignored"}
              },
              "/tmp/workspace"
@@ -1155,7 +1155,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
            }
 
     assert {:ok, remote_policy} =
-             Schema.resolve_runtime_turn_sandbox_policy(settings, nil, remote: true)
+             Schema.resolve_runtime_turn_sandbox_policy(settings, :codex, nil, remote: true)
 
     assert remote_policy == %{
              "type" => "workspaceWrite",
@@ -1244,12 +1244,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, canonical_workspace_root} =
                SymphonyElixir.PathSafety.canonicalize(workspace_root)
 
-      assert {:ok, default_policy} = Schema.resolve_runtime_turn_sandbox_policy(settings)
+      assert {:ok, default_policy} = Schema.resolve_runtime_turn_sandbox_policy(settings, :codex)
       assert default_policy["type"] == "workspaceWrite"
       assert default_policy["writableRoots"] == [canonical_workspace_root]
 
       assert {:ok, blank_workspace_policy} =
-               Schema.resolve_runtime_turn_sandbox_policy(settings, "")
+               Schema.resolve_runtime_turn_sandbox_policy(settings, :codex, "")
 
       assert blank_workspace_policy == default_policy
 
@@ -1259,7 +1259,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       }
 
       assert {:ok, %{"type" => "readOnly", "networkAccess" => true}} =
-               Schema.resolve_runtime_turn_sandbox_policy(read_only_settings, 123)
+               Schema.resolve_runtime_turn_sandbox_policy(read_only_settings, :codex, 123)
 
       future_settings = %{
         settings
@@ -1267,10 +1267,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       }
 
       assert {:ok, %{"type" => "futureSandbox", "nested" => %{"flag" => true}}} =
-               Schema.resolve_runtime_turn_sandbox_policy(future_settings, 123)
+               Schema.resolve_runtime_turn_sandbox_policy(future_settings, :codex, 123)
 
       assert {:error, {:unsafe_turn_sandbox_policy, {:invalid_workspace_root, 123}}} =
-               Schema.resolve_runtime_turn_sandbox_policy(settings, 123)
+               Schema.resolve_runtime_turn_sandbox_policy(settings, :codex, 123)
     after
       File.rm_rf(test_root)
     end

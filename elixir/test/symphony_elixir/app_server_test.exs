@@ -30,10 +30,10 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:error, {:invalid_workspace_cwd, :workspace_root, _path}} =
-               AppServer.run(workspace_root, "guard", issue)
+               AppServer.run(:codex, workspace_root, "guard", issue)
 
       assert {:error, {:invalid_workspace_cwd, :outside_workspace_root, _path, _root}} =
-               AppServer.run(outside_workspace, "guard", issue)
+               AppServer.run(:codex, outside_workspace, "guard", issue)
     after
       File.rm_rf(test_root)
     end
@@ -70,7 +70,7 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:error, {:invalid_workspace_cwd, :symlink_escape, ^symlink_workspace, _root}} =
-               AppServer.run(symlink_workspace, "guard", issue)
+               AppServer.run(:codex, symlink_workspace, "guard", issue)
     after
       File.rm_rf(test_root)
     end
@@ -159,7 +159,7 @@ defmodule SymphonyElixir.AppServerTest do
           codex_turn_sandbox_policy: configured_policy
         )
 
-        assert {:ok, _result} = AppServer.run(workspace, "Validate supported turn policy", issue)
+        assert {:ok, _result} = AppServer.run(:codex, workspace, "Validate supported turn policy", issue)
 
         trace = File.read!(trace_file)
         lines = String.split(trace, "\n", trim: true)
@@ -254,7 +254,7 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:error, {:turn_input_required, payload}} =
-               AppServer.run(workspace, "Needs input", issue)
+               AppServer.run(:codex, workspace, "Needs input", issue)
 
       assert payload["method"] == "turn/input_required"
     after
@@ -319,7 +319,7 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:error, {:turn_input_required, payload}} =
-               AppServer.run(workspace, "Needs MCP input", issue)
+               AppServer.run(:codex, workspace, "Needs MCP input", issue)
 
       assert payload["method"] == "mcpServer/elicitation/request"
     after
@@ -382,7 +382,7 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:error, {:approval_required, payload}} =
-               AppServer.run(workspace, "Handle approval request", issue)
+               AppServer.run(:codex, workspace, "Handle approval request", issue)
 
       assert payload["method"] == "item/commandExecution/requestApproval"
     after
@@ -465,7 +465,7 @@ defmodule SymphonyElixir.AppServerTest do
         labels: ["backend"]
       }
 
-      assert {:ok, _result} = AppServer.run(workspace, "Handle approval request", issue)
+      assert {:ok, _result} = AppServer.run(:codex, workspace, "Handle approval request", issue)
 
       trace = File.read!(trace_file)
       lines = String.split(trace, "\n", trim: true)
@@ -602,7 +602,7 @@ defmodule SymphonyElixir.AppServerTest do
         labels: ["backend"]
       }
 
-      assert {:ok, _result} = AppServer.run(workspace, "Handle tool approval prompt", issue)
+      assert {:ok, _result} = AppServer.run(:codex, workspace, "Handle tool approval prompt", issue)
 
       trace = File.read!(trace_file)
       lines = String.split(trace, "\n", trim: true)
@@ -690,7 +690,7 @@ defmodule SymphonyElixir.AppServerTest do
       on_message = fn message -> send(self(), {:app_server_message, message}) end
 
       assert {:ok, _result} =
-               AppServer.run(workspace, "Handle generic tool input", issue, on_message: on_message)
+               AppServer.run(:codex, workspace, "Handle generic tool input", issue, on_message: on_message)
 
       assert_received {:app_server_message,
                        %{
@@ -777,7 +777,7 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:ok, _result} =
-               AppServer.run(workspace, "Handle option based tool input", issue)
+               AppServer.run(:codex, workspace, "Handle option based tool input", issue)
 
       trace = File.read!(trace_file)
       lines = String.split(trace, "\n", trim: true)
@@ -876,7 +876,7 @@ defmodule SymphonyElixir.AppServerTest do
         labels: ["backend"]
       }
 
-      assert {:ok, _result} = AppServer.run(workspace, "Reject unsupported tool calls", issue)
+      assert {:ok, _result} = AppServer.run(:codex, workspace, "Reject unsupported tool calls", issue)
 
       trace = File.read!(trace_file)
       lines = String.split(trace, "\n", trim: true)
@@ -994,7 +994,7 @@ defmodule SymphonyElixir.AppServerTest do
       end
 
       assert {:ok, _result} =
-               AppServer.run(workspace, "Handle supported tool calls", issue, tool_executor: tool_executor)
+               AppServer.run(:codex, workspace, "Handle supported tool calls", issue, tool_executor: tool_executor)
 
       assert_received {:tool_called, "linear_graphql",
                        %{
@@ -1118,7 +1118,7 @@ defmodule SymphonyElixir.AppServerTest do
       on_message = fn message -> send(test_pid, {:app_server_message, message}) end
 
       assert {:ok, _result} =
-               AppServer.run(workspace, "Handle failed tool calls", issue,
+               AppServer.run(:codex, workspace, "Handle failed tool calls", issue,
                  on_message: on_message,
                  tool_executor: tool_executor
                )
@@ -1189,7 +1189,7 @@ defmodule SymphonyElixir.AppServerTest do
         labels: ["backend"]
       }
 
-      assert {:ok, _result} = AppServer.run(workspace, "Validate newline-delimited buffering", issue)
+      assert {:ok, _result} = AppServer.run(:codex, workspace, "Validate newline-delimited buffering", issue)
     after
       File.rm_rf(test_root)
     end
@@ -1259,7 +1259,7 @@ defmodule SymphonyElixir.AppServerTest do
       log =
         capture_log(fn ->
           assert {:ok, _result} =
-                   AppServer.run(workspace, "Capture stderr log", issue, on_message: on_message)
+                   AppServer.run(:codex, workspace, "Capture stderr log", issue, on_message: on_message)
         end)
 
       assert_received {:app_server_message, %{event: :turn_completed}}
@@ -1332,7 +1332,7 @@ defmodule SymphonyElixir.AppServerTest do
       on_message = fn message -> send(test_pid, {:app_server_message, message}) end
 
       assert {:ok, _result} =
-               AppServer.run(workspace, "Capture malformed protocol line", issue, on_message: on_message)
+               AppServer.run(:codex, workspace, "Capture malformed protocol line", issue, on_message: on_message)
 
       assert_received {:app_server_message, %{event: :malformed, payload: "{\"method\":\"turn/completed\""}}
       assert_received {:app_server_message, %{event: :turn_completed}}
@@ -1415,6 +1415,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       assert {:ok, _result} =
                AppServer.run(
+                 :codex,
                  remote_workspace,
                  "Run remote worker",
                  issue,

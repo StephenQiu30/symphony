@@ -77,23 +77,27 @@ defmodule SymphonyElixir.AgentRunner do
   defp send_worker_runtime_info(_recipient, _issue, _worker_host, _workspace), do: :ok
 
   defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
-    case Config.agent_runtime(issue) do
-      runtime when runtime in [:claude, :cursor, :gemini] ->
-        run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
+    runtime = Config.agent_runtime(issue)
+    model = Config.agent_model(runtime, issue)
+    opts = if model, do: Keyword.put(opts, :model, model), else: opts
 
-      :codex ->
-        run_app_server_agent_turns(:codex, workspace, issue, codex_update_recipient, opts, worker_host)
+    case Config.runtime_protocol(runtime) do
+      "app-server" ->
+        run_app_server_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
+
+      "cli" ->
+        run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
     end
   end
 
-  defp run_app_server_agent_turns(:codex, workspace, issue, codex_update_recipient, opts, worker_host) do
+  defp run_app_server_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host) do
     max_turns = Keyword.get(opts, :max_turns, Config.settings!().agent.max_turns)
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
 
-    with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+    with {:ok, session} <- AppServer.start_session(runtime, workspace, worker_host: worker_host) do
       try do
         do_run_app_server_agent_turns(
-          :codex,
+          runtime,
           session,
           workspace,
           issue,
@@ -274,7 +278,7 @@ defmodule SymphonyElixir.AgentRunner do
   end
 
   defp validate_cli_runtime_command_exists(runtime) when runtime in [:claude, :cursor, :gemini] do
-    case Config.cli_agent_settings(runtime).command do
+    case Config.runtime_settings(runtime).command do
       command when is_binary(command) and command != "" ->
         :ok
 

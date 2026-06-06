@@ -162,14 +162,17 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  defmodule Codex do
+  defmodule AgentRuntime do
     @moduledoc false
     use Ecto.Schema
     import Ecto.Changeset
 
     @primary_key false
     embedded_schema do
-      field(:command, :string, default: "codex app-server")
+      field(:command, :string)
+      field(:protocol, :string)
+      field(:model, :string)
+      field(:prompt_mode, :string, default: "argument")
 
       field(:approval_policy, StringOrMap,
         default: %{
@@ -188,50 +191,48 @@ defmodule SymphonyElixir.Config.Schema do
       field(:stall_timeout_ms, :integer, default: 300_000)
     end
 
-    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
-    def changeset(schema, attrs) do
-      schema
-      |> cast(
-        attrs,
-        [
-          :command,
-          :approval_policy,
-          :thread_sandbox,
-          :turn_sandbox_policy,
-          :turn_timeout_ms,
-          :read_timeout_ms,
-          :stall_timeout_ms
-        ],
-        empty_values: []
-      )
-      |> validate_required([:command])
-      |> validate_number(:turn_timeout_ms, greater_than: 0)
-      |> validate_number(:read_timeout_ms, greater_than: 0)
-      |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
-    end
-  end
+    @spec changeset(%__MODULE__{}, map(), String.t(), String.t() | nil) :: Ecto.Changeset.t()
+    def changeset(schema, attrs, default_protocol \\ "cli", default_command \\ nil) do
+      changeset =
+        schema
+        |> cast(
+          attrs,
+          [
+            :command,
+            :protocol,
+            :model,
+            :prompt_mode,
+            :approval_policy,
+            :thread_sandbox,
+            :turn_sandbox_policy,
+            :turn_timeout_ms,
+            :read_timeout_ms,
+            :stall_timeout_ms
+          ],
+          empty_values: []
+        )
 
-  defmodule CliRuntime do
-    @moduledoc false
-    use Ecto.Schema
-    import Ecto.Changeset
+      changeset =
+        if get_field(changeset, :protocol) == nil do
+          put_change(changeset, :protocol, default_protocol)
+        else
+          changeset
+        end
 
-    @primary_key false
-    embedded_schema do
-      field(:command, :string)
-      field(:prompt_mode, :string, default: "argument")
-      field(:turn_timeout_ms, :integer, default: 3_600_000)
-      field(:read_timeout_ms, :integer, default: 5_000)
-    end
+      changeset =
+        if get_field(changeset, :command) == nil && default_command != nil do
+          put_change(changeset, :command, default_command)
+        else
+          changeset
+        end
 
-    @spec changeset(%__MODULE__{}, map()) :: Ecto.Changeset.t()
-    def changeset(schema, attrs) do
-      schema
-      |> cast(attrs, [:command, :prompt_mode, :turn_timeout_ms, :read_timeout_ms], empty_values: [])
-      |> validate_required([:command])
+      changeset
+      |> validate_required([:command, :protocol])
+      |> validate_inclusion(:protocol, ["app-server", "cli"])
       |> validate_inclusion(:prompt_mode, ["stdin", "argument"])
       |> validate_number(:turn_timeout_ms, greater_than: 0)
       |> validate_number(:read_timeout_ms, greater_than: 0)
+      |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
     end
   end
 
@@ -303,10 +304,10 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:workspace, Workspace, on_replace: :update, defaults_to_struct: true)
     embeds_one(:worker, Worker, on_replace: :update, defaults_to_struct: true)
     embeds_one(:agent, Agent, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:claude, CliRuntime, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:cursor, CliRuntime, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:gemini, CliRuntime, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:codex, AgentRuntime, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:claude, AgentRuntime, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:cursor, AgentRuntime, on_replace: :update, defaults_to_struct: true)
+    embeds_one(:gemini, AgentRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
@@ -342,10 +343,10 @@ defmodule SymphonyElixir.Config.Schema do
     end
   end
 
-  @spec resolve_runtime_turn_sandbox_policy(%__MODULE__{}, Path.t() | nil, keyword()) ::
+  @spec resolve_runtime_turn_sandbox_policy(t(), atom(), Path.t() | nil, keyword()) ::
           {:ok, map()} | {:error, term()}
-  def resolve_runtime_turn_sandbox_policy(settings, workspace \\ nil, opts \\ []) do
-    case settings.codex.turn_sandbox_policy do
+  def resolve_runtime_turn_sandbox_policy(settings, runtime, workspace \\ nil, opts \\ []) do
+    case Map.get(settings, runtime).turn_sandbox_policy do
       %{} = policy ->
         {:ok, policy}
 
@@ -431,10 +432,10 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:workspace, with: &Workspace.changeset/2)
     |> cast_embed(:worker, with: &Worker.changeset/2)
     |> cast_embed(:agent, with: &Agent.changeset/2)
-    |> cast_embed(:codex, with: &Codex.changeset/2)
-    |> cast_embed(:claude, with: &CliRuntime.changeset/2)
-    |> cast_embed(:cursor, with: &CliRuntime.changeset/2)
-    |> cast_embed(:gemini, with: &CliRuntime.changeset/2)
+    |> cast_embed(:codex, with: &AgentRuntime.changeset(&1, &2, "app-server", "codex app-server"))
+    |> cast_embed(:claude, with: &AgentRuntime.changeset(&1, &2, "cli"))
+    |> cast_embed(:cursor, with: &AgentRuntime.changeset(&1, &2, "cli"))
+    |> cast_embed(:gemini, with: &AgentRuntime.changeset(&1, &2, "cli"))
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
@@ -455,13 +456,19 @@ defmodule SymphonyElixir.Config.Schema do
 
     codex = %{
       settings.codex
-      | approval_policy: normalize_keys(settings.codex.approval_policy),
+      | command: settings.codex.command || "codex app-server",
+        protocol: settings.codex.protocol || "app-server",
+        approval_policy: normalize_keys(settings.codex.approval_policy),
         turn_sandbox_policy: normalize_optional_map(settings.codex.turn_sandbox_policy)
     }
 
+    claude = %{settings.claude | protocol: settings.claude.protocol || "cli"}
+    cursor = %{settings.cursor | protocol: settings.cursor.protocol || "cli"}
+    gemini = %{settings.gemini | protocol: settings.gemini.protocol || "cli"}
+
     server = %{settings.server | host: resolve_plain_setting(settings.server.host, System.get_env("SYMPHONY_SERVER_HOST") || "0.0.0.0")}
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex, server: server}
+    %{settings | tracker: tracker, workspace: workspace, codex: codex, claude: claude, cursor: cursor, gemini: gemini, server: server}
   end
 
   defp normalize_keys(value) when is_map(value) do

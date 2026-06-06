@@ -104,14 +104,30 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  @spec cli_agent_settings(:claude | :cursor | :gemini) :: map()
-  def cli_agent_settings(:claude), do: settings!().claude
-  def cli_agent_settings(:cursor), do: settings!().cursor
-  def cli_agent_settings(:gemini), do: settings!().gemini
+  @spec runtime_settings(:codex | :claude | :cursor | :gemini) :: map()
+  def runtime_settings(:codex), do: settings!().codex
+  def runtime_settings(:claude), do: settings!().claude
+  def runtime_settings(:cursor), do: settings!().cursor
+  def runtime_settings(:gemini), do: settings!().gemini
+
+  @spec runtime_protocol(:codex | :claude | :cursor | :gemini) :: String.t()
+  def runtime_protocol(runtime), do: runtime_settings(runtime).protocol
+
+  @spec agent_model(atom(), map()) :: String.t() | nil
+  def agent_model(runtime, issue) do
+    settings = runtime_settings(runtime)
+
+    Enum.find_value(issue.labels, settings.model, fn label ->
+      case String.split(Schema.normalize_label(label), ":", parts: 2) do
+        ["model", model_name] -> String.trim(model_name)
+        _ -> nil
+      end
+    end)
+  end
 
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
   def codex_turn_sandbox_policy(workspace \\ nil) do
-    case Schema.resolve_runtime_turn_sandbox_policy(settings!(), workspace) do
+    case Schema.resolve_runtime_turn_sandbox_policy(settings!(), :codex, workspace) do
       {:ok, policy} ->
         policy
 
@@ -152,16 +168,18 @@ defmodule SymphonyElixir.Config do
     agent_app_server_settings(:codex, workspace, opts)
   end
 
-  @spec agent_app_server_settings(:codex, Path.t() | nil, keyword()) ::
+  @spec agent_app_server_settings(atom(), Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
-  def agent_app_server_settings(:codex, workspace \\ nil, opts \\ []) do
+  def agent_app_server_settings(runtime, workspace \\ nil, opts \\ []) do
     with {:ok, settings} <- settings() do
       with {:ok, turn_sandbox_policy} <-
-             Schema.resolve_runtime_turn_sandbox_policy(settings, workspace, opts) do
+             Schema.resolve_runtime_turn_sandbox_policy(settings, runtime, workspace, opts) do
+        runtime_config = Map.get(settings, runtime)
+
         {:ok,
          %{
-           approval_policy: settings.codex.approval_policy,
-           thread_sandbox: settings.codex.thread_sandbox,
+           approval_policy: runtime_config.approval_policy,
+           thread_sandbox: runtime_config.thread_sandbox,
            turn_sandbox_policy: turn_sandbox_policy
          }}
       end
@@ -170,7 +188,7 @@ defmodule SymphonyElixir.Config do
 
   defp validate_semantics(settings) do
     with :ok <- validate_tracker(settings),
-         :ok <- validate_cli_runtime_commands(settings) do
+         :ok <- validate_runtime_commands(settings) do
       :ok
     end
   end
@@ -194,16 +212,16 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp validate_cli_runtime_commands(settings) do
+  defp validate_runtime_commands(settings) do
     settings
-    |> configured_cli_runtimes()
+    |> configured_runtimes()
     |> Enum.find_value(fn runtime ->
-      case cli_runtime_command(settings, runtime) do
+      case runtime_command(settings, runtime) do
         command when is_binary(command) and command != "" ->
           nil
 
         _ ->
-          {:error, {:missing_cli_runtime_command, runtime}}
+          {:error, {:missing_runtime_command, runtime}}
       end
     end)
     |> case do
@@ -212,25 +230,19 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp configured_cli_runtimes(settings) do
+  defp configured_runtimes(settings) do
     label_runtimes =
       (settings.agent.runtime_by_label || %{})
       |> Map.values()
       |> Enum.map(&runtime_atom/1)
-      |> Enum.filter(&(&1 in [:claude, :cursor, :gemini]))
+      |> Enum.reject(&is_nil/1)
 
     default_runtime = default_agent_runtime(settings)
 
-    if default_runtime in [:claude, :cursor, :gemini] do
-      Enum.uniq([default_runtime | label_runtimes])
-    else
-      Enum.uniq(label_runtimes)
-    end
+    Enum.uniq([default_runtime | label_runtimes])
   end
 
-  defp cli_runtime_command(settings, :claude), do: settings.claude.command
-  defp cli_runtime_command(settings, :cursor), do: settings.cursor.command
-  defp cli_runtime_command(settings, :gemini), do: settings.gemini.command
+  defp runtime_command(settings, runtime), do: Map.get(settings, runtime).command
 
   defp runtime_atom("codex"), do: :codex
   defp runtime_atom("claude"), do: :claude
@@ -252,8 +264,8 @@ defmodule SymphonyElixir.Config do
       :workflow_front_matter_not_a_map ->
         "Failed to parse WORKFLOW.md: workflow front matter must decode to a map"
 
-      {:missing_cli_runtime_command, runtime} ->
-        "Missing WORKFLOW.md #{runtime} command for configured CLI runtime"
+      {:missing_runtime_command, runtime} ->
+        "Missing WORKFLOW.md #{runtime} command for configured runtime"
 
       other ->
         "Invalid WORKFLOW.md config: #{inspect(other)}"

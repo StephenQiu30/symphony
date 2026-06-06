@@ -997,14 +997,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert :ok = Config.validate!()
   end
 
-  test "config rejects gemini runtime selection" do
+  test "config rejects unsupported runtime selection" do
     workflow = """
     ---
     tracker:
       kind: memory
     agent:
       runtime_by_label:
-        agent:gemini: gemini
+        agent:unsupported: unsupported
     ---
     Runtime prompt body.
     """

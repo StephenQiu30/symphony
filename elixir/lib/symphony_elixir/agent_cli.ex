@@ -4,10 +4,10 @@ defmodule SymphonyElixir.AgentCli do
   require Logger
   alias SymphonyElixir.{Config, SSH}
 
-  @type runtime :: :claude | :cursor
+  @type runtime :: :claude | :cursor | :gemini
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor] do
+  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :gemini] do
     worker_host = Keyword.get(opts, :worker_host)
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
@@ -71,6 +71,10 @@ defmodule SymphonyElixir.AgentCli do
     |> Enum.join("\n")
   end
 
+  defp launch_command(:gemini, %{command: command}) do
+    "#{headless_command(:gemini, command)} -p \"$(cat \"$prompt_file\")\""
+  end
+
   defp launch_command(runtime, %{command: command, prompt_mode: "argument"}) do
     "#{headless_command(runtime, command)} \"$(cat \"$prompt_file\")\""
   end
@@ -96,6 +100,13 @@ defmodule SymphonyElixir.AgentCli do
     |> ensure_json_output("stream-json")
     |> ensure_flag(~r/(^|\s)--stream-partial-output(\s|$)/, "--stream-partial-output")
     |> ensure_flag(~r/(^|\s)--approve-mcps(\s|$)/, "--approve-mcps")
+  end
+
+  defp headless_command(:gemini, command) do
+    command
+    |> ensure_flag(~r/(^|\s)--skip-trust(\s|$)/, "--skip-trust")
+    |> ensure_flag(~r/(^|\s)(--approval-mode(\s|=)|--yolo(\s|$)|-y(\s|$))/, "--approval-mode yolo")
+    |> ensure_json_output("stream-json")
   end
 
   defp ensure_flag(command, pattern, flag) do
@@ -231,6 +242,12 @@ defmodule SymphonyElixir.AgentCli do
       |> Enum.map(&String.trim_trailing(&1, "\r"))
 
     {lines, pending_line}
+  end
+
+  defp interactive_prompt_reason(:gemini, output) do
+    if String.contains?(output, "Opening authentication page in your browser") or String.contains?(output, "Do you want to continue? [Y/n]") do
+      {:cli_agent_interactive_prompt, :gemini, :authentication}
+    end
   end
 
   defp interactive_prompt_reason(_runtime, _output), do: nil

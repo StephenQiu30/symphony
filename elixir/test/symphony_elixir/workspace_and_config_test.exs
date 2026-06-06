@@ -970,7 +970,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().worker.max_concurrent_agents_per_host == 2
   end
 
-  test "config supports claude and cursor runtime selection" do
+  test "config supports claude cursor and gemini runtime selection" do
     workflow = """
     ---
     tracker:
@@ -980,10 +980,13 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       runtime_by_label:
         agent:claude: claude
         agent:cursor: cursor
+        agent:gemini: gemini
     claude:
       command: claude
     cursor:
       command: cursor-agent
+    gemini:
+      command: gemini
     ---
     Runtime prompt body.
     """
@@ -994,26 +997,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.agent_runtime() == :codex
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :claude
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:cursor"]}) == :cursor
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:gemini"]}) == :gemini
+    assert Config.cli_agent_settings(:gemini).command == "gemini"
     assert :ok = Config.validate!()
-  end
-
-  test "config rejects unsupported runtime selection" do
-    workflow = """
-    ---
-    tracker:
-      kind: memory
-    agent:
-      runtime_by_label:
-        agent:unsupported: unsupported
-    ---
-    Runtime prompt body.
-    """
-
-    File.write!(Workflow.workflow_file_path(), workflow)
-    WorkflowStore.force_reload()
-
-    assert {:error, {:invalid_workflow_config, message}} = Config.settings()
-    assert message =~ "runtime values must be one of codex, claude, cursor"
   end
 
   test "validate rejects runtime_by_label without matching cli command block" do

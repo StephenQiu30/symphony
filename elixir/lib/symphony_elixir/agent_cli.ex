@@ -180,7 +180,7 @@ defmodule SymphonyElixir.AgentCli do
           drain_available_port_output(port, on_message, metadata, pending_line, state)
 
         state = flush_pending_cli_line(on_message, metadata, pending_line, state)
-        reason = {:cli_agent_exit, runtime, status}
+        reason = cli_exit_reason(runtime, status, state)
         emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: reason}, metadata)
         {:error, reason}
     after
@@ -274,6 +274,12 @@ defmodule SymphonyElixir.AgentCli do
     {:ok, %{result: :turn_completed, session_id: state.session_id, thread_id: state.session_id, turn_id: "turn-1"}}
   end
 
+  defp cli_exit_reason(runtime, _status, %{failed_payload: failed_payload}) when is_map(failed_payload) do
+    {:cli_agent_failed, runtime, failed_payload}
+  end
+
+  defp cli_exit_reason(runtime, status, _state), do: {:cli_agent_exit, runtime, status}
+
   defp emit_cli_line(on_message, line, metadata, state) do
     case Jason.decode(line) do
       {:ok, payload} ->
@@ -305,8 +311,9 @@ defmodule SymphonyElixir.AgentCli do
       state = %{state | result_payload: payload}
       subtype = map_value(payload, ["subtype", :subtype])
       is_error = map_value(payload, ["is_error", :is_error])
+      status = map_value(payload, ["status", :status])
 
-      if is_error == true or (is_binary(subtype) and subtype not in ["success", ""]) do
+      if is_error == true or failed_result_field?(subtype, ["success", ""]) or failed_result_field?(status, ["success", "completed", ""]) do
         %{state | failed_payload: payload}
       else
         state
@@ -315,6 +322,9 @@ defmodule SymphonyElixir.AgentCli do
       state
     end
   end
+
+  defp failed_result_field?(value, allowed_values) when is_binary(value), do: value not in allowed_values
+  defp failed_result_field?(_value, _allowed_values), do: false
 
   defp normalize_result_payload(payload) when is_map(payload) do
     case {Map.get(payload, "usage"), Map.get(payload, "stats")} do

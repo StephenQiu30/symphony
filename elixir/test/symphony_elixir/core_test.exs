@@ -1999,4 +1999,57 @@ defmodule SymphonyElixir.CoreTest do
       File.rm_rf(test_root)
     end
   end
+
+  test "cli agent treats gemini error result payload as the exit reason" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-gemini-cli-error-#{System.unique_integer([:positive])}")
+    previous_gemini_api_key = System.get_env("GEMINI_API_KEY")
+    previous_google_api_key = System.get_env("GOOGLE_API_KEY")
+
+    try do
+      System.put_env("GEMINI_API_KEY", "test-key")
+      System.delete_env("GOOGLE_API_KEY")
+
+      workspace = Path.join(test_root, "workspace")
+      gemini_binary = Path.join(test_root, "fake-gemini")
+      File.mkdir_p!(workspace)
+
+      File.write!(gemini_binary, """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"init","session_id":"gemini-error-session","model":"auto"}'
+      printf '%s\\n' '{"type":"result","status":"error","error":{"type":"quota","message":"quota exhausted"},"stats":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}'
+      exit 1
+      """)
+
+      File.chmod!(gemini_binary, 0o755)
+
+      File.write!(Workflow.workflow_file_path(), """
+      ---
+      tracker:
+        kind: memory
+      gemini:
+        command: "#{gemini_binary}"
+      ---
+      Gemini prompt body.
+      """)
+
+      WorkflowStore.force_reload()
+      parent = self()
+
+      issue = %Issue{id: "issue-gemini-error-json", identifier: "STE-47", title: "Parse Gemini error JSON", description: "Gemini JSON errors should be structured", state: "In Progress", labels: []}
+
+      assert {:error, {:cli_agent_failed, :gemini, %{"status" => "error", "error" => %{"message" => "quota exhausted"}}}} =
+               SymphonyElixir.AgentCli.run(:gemini, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :turn_ended_with_error,
+                        cli_agent_runtime: "gemini",
+                        reason: {:cli_agent_failed, :gemini, %{"status" => "error", "error" => %{"message" => "quota exhausted"}}}
+                      }}
+    after
+      restore_env("GEMINI_API_KEY", previous_gemini_api_key)
+      restore_env("GOOGLE_API_KEY", previous_google_api_key)
+      File.rm_rf(test_root)
+    end
+  end
 end

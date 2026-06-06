@@ -33,7 +33,7 @@ agent:
     agent:codex: codex
     agent:claude: claude
     agent:cursor: cursor
-    agent:gemini: gemini
+    agent:gemini: claude
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -91,7 +91,7 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:codex` → Codex app-server
 - `agent:claude` → Claude CLI
 - `agent:cursor` → Cursor CLI
-- `agent:gemini` → Gemini CLI
+- `agent:gemini` → Claude CLI while the local Gemini CLI quota is unavailable
 
 When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
 

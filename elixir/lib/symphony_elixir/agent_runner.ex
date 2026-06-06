@@ -78,7 +78,7 @@ defmodule SymphonyElixir.AgentRunner do
 
   defp run_agent_turns(workspace, issue, codex_update_recipient, opts, worker_host) do
     case Config.agent_runtime(issue) do
-      runtime when runtime in [:claude, :cursor, :gemini] ->
+      runtime when runtime in [:claude, :cursor] ->
         run_cli_agent_turns(runtime, workspace, issue, codex_update_recipient, opts, worker_host)
 
       :codex ->
@@ -269,11 +269,11 @@ defmodule SymphonyElixir.AgentRunner do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
   end
 
-  defp validate_cli_runtime_command(runtime) when runtime in [:claude, :cursor, :gemini] do
+  defp validate_cli_runtime_command(runtime) when runtime in [:claude, :cursor] do
     validate_cli_runtime_command_exists(runtime)
   end
 
-  defp validate_cli_runtime_command_exists(runtime) when runtime in [:claude, :cursor, :gemini] do
+  defp validate_cli_runtime_command_exists(runtime) when runtime in [:claude, :cursor] do
     case Config.cli_agent_settings(runtime).command do
       command when is_binary(command) and command != "" ->
         :ok

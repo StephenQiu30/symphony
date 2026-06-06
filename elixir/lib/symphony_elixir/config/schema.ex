@@ -151,7 +151,7 @@ defmodule SymphonyElixir.Config.Schema do
         ],
         empty_values: []
       )
-      |> validate_inclusion(:default_runtime, ["codex", "claude", "cursor", "gemini"])
+      |> validate_inclusion(:default_runtime, ["codex", "claude", "cursor"])
       |> validate_number(:max_concurrent_agents, greater_than: 0)
       |> validate_number(:max_turns, greater_than: 0)
       |> validate_number(:max_retry_backoff_ms, greater_than: 0)
@@ -306,7 +306,6 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:codex, Codex, on_replace: :update, defaults_to_struct: true)
     embeds_one(:claude, CliRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:cursor, CliRuntime, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:gemini, CliRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
@@ -388,7 +387,7 @@ defmodule SymphonyElixir.Config.Schema do
       Enum.flat_map(runtime_by_label, fn {label, runtime} ->
         cond do
           label == "" -> [{field, "labels must not be blank"}]
-          runtime not in ["codex", "claude", "cursor", "gemini"] -> [{field, "runtime values must be one of codex, claude, cursor, gemini"}]
+          runtime not in ["codex", "claude", "cursor"] -> [{field, "runtime values must be one of codex, claude, cursor"}]
           true -> []
         end
       end)
@@ -434,7 +433,6 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:codex, with: &Codex.changeset/2)
     |> cast_embed(:claude, with: &CliRuntime.changeset/2)
     |> cast_embed(:cursor, with: &CliRuntime.changeset/2)
-    |> cast_embed(:gemini, with: &CliRuntime.changeset/2)
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)

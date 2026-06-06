@@ -61,8 +61,8 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
-  @spec agent_runtime() :: :codex | :claude | :cursor | :gemini
-  @spec agent_runtime(term()) :: :codex | :claude | :cursor | :gemini
+  @spec agent_runtime() :: :codex | :claude | :cursor
+  @spec agent_runtime(term()) :: :codex | :claude | :cursor
   def agent_runtime(issue \\ nil) do
     settings = settings!()
 
@@ -86,7 +86,6 @@ defmodule SymphonyElixir.Config do
         "codex" -> :codex
         "claude" -> :claude
         "cursor" -> :cursor
-        "gemini" -> :gemini
         _ -> nil
       end
     end)
@@ -99,15 +98,13 @@ defmodule SymphonyElixir.Config do
       "codex" -> :codex
       "claude" -> :claude
       "cursor" -> :cursor
-      "gemini" -> :gemini
       _ -> :codex
     end
   end
 
-  @spec cli_agent_settings(:claude | :cursor | :gemini) :: map()
+  @spec cli_agent_settings(:claude | :cursor) :: map()
   def cli_agent_settings(:claude), do: settings!().claude
   def cli_agent_settings(:cursor), do: settings!().cursor
-  def cli_agent_settings(:gemini), do: settings!().gemini
 
   @spec codex_turn_sandbox_policy(Path.t() | nil) :: map()
   def codex_turn_sandbox_policy(workspace \\ nil) do
@@ -217,11 +214,11 @@ defmodule SymphonyElixir.Config do
       (settings.agent.runtime_by_label || %{})
       |> Map.values()
       |> Enum.map(&runtime_atom/1)
-      |> Enum.filter(&(&1 in [:claude, :cursor, :gemini]))
+      |> Enum.filter(&(&1 in [:claude, :cursor]))
 
     default_runtime = default_agent_runtime(settings)
 
-    if default_runtime in [:claude, :cursor, :gemini] do
+    if default_runtime in [:claude, :cursor] do
       Enum.uniq([default_runtime | label_runtimes])
     else
       Enum.uniq(label_runtimes)
@@ -230,12 +227,10 @@ defmodule SymphonyElixir.Config do
 
   defp cli_runtime_command(settings, :claude), do: settings.claude.command
   defp cli_runtime_command(settings, :cursor), do: settings.cursor.command
-  defp cli_runtime_command(settings, :gemini), do: settings.gemini.command
 
   defp runtime_atom("codex"), do: :codex
   defp runtime_atom("claude"), do: :claude
   defp runtime_atom("cursor"), do: :cursor
-  defp runtime_atom("gemini"), do: :gemini
   defp runtime_atom(_), do: nil
 
   defp format_config_error(reason) do

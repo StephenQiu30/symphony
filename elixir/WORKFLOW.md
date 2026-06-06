@@ -33,7 +33,6 @@ agent:
     agent:codex: codex
     agent:claude: claude
     agent:cursor: cursor
-    agent:gemini: gemini
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -47,8 +46,6 @@ claude:
 cursor:
   command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
   prompt_mode: argument
-gemini:
-  command: gemini --skip-trust --approval-mode yolo
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -91,27 +88,8 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:codex` → Codex app-server
 - `agent:claude` → Claude CLI
 - `agent:cursor` → Cursor CLI
-- `agent:gemini` → Gemini CLI
 
 When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
-
-### Gemini vs Antigravity
-
-The `gemini.command` setting is for the Gemini CLI headless `stream-json`
-protocol. It does not automatically use Antigravity just because
-`~/.gemini/antigravity` exists. If this project should run through
-Antigravity, first verify a healthy Antigravity Agent API session from the same
-shell:
-
-```sh
-ANTIGRAVITY_LS_ADDRESS=127.0.0.1:<grpc-port> \
-  ~/.gemini/antigravity/bin/agentapi new-conversation --model=flash "health check"
-```
-
-If that command reports missing CSRF token, model fetch failure, or
-`state syncing error: key not found`, the Antigravity login/session is not
-usable by Symphony yet. Do not start unattended Symphony retries in that state;
-fix Antigravity auth first or keep using the Gemini CLI command above.
 
 ## Prerequisite: Linear access is available
 

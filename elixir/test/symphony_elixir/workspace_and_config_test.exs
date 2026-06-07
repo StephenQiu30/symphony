@@ -1007,6 +1007,16 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
            }) == :gemini
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
+             state: "Agent Review",
+             labels: ["agent:claude"]
+           }) == :gemini
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
+             state: "Agent Review",
+             labels: ["review:gemini", "agent:claude"]
+           }) == :gemini
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "In Progress",
              labels: ["agent:claude", "reviewer:gemini"]
            }) == :claude

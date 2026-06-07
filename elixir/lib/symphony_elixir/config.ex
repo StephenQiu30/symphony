@@ -79,7 +79,7 @@ defmodule SymphonyElixir.Config do
   defp issue_label_runtime(%{labels: labels, state: state}, settings)
        when is_list(labels) and is_binary(state) do
     if Schema.normalize_issue_state(state) == "agent review" do
-      reviewer_label_runtime(labels, settings) || agent_label_runtime(labels, settings)
+      reviewer_label_runtime(labels, settings) || default_reviewer_runtime(settings)
     else
       agent_label_runtime(labels, settings)
     end
@@ -118,6 +118,10 @@ defmodule SymphonyElixir.Config do
         _ -> nil
       end
     end)
+  end
+
+  defp default_reviewer_runtime(settings) do
+    mapped_label_runtime(["reviewer:gemini"], settings)
   end
 
   defp default_agent_runtime(settings) do

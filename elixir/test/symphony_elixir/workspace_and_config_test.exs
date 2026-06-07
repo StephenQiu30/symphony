@@ -981,6 +981,8 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         agent:claude: claude
         agent:cursor: cursor
         agent:gemini: gemini
+        reviewer:codex: codex
+        reviewer:gemini: gemini
     claude:
       command: claude
     cursor:
@@ -998,6 +1000,22 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :claude
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:cursor"]}) == :cursor
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:gemini"]}) == :gemini
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
+             state: "Agent Review",
+             labels: ["agent:claude", "reviewer:gemini"]
+           }) == :gemini
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
+             state: "In Progress",
+             labels: ["agent:claude", "reviewer:gemini"]
+           }) == :claude
+
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
+             state: "Todo",
+             labels: ["reviewer:gemini", "agent:claude"]
+           }) == :claude
+
     assert Config.runtime_settings(:gemini).command == "gemini"
     assert :ok = Config.validate!()
   end

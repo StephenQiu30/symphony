@@ -5,6 +5,7 @@ tracker:
   active_states:
     - Todo
     - In Progress
+    - Agent Review
     - Merging
     - Rework
   terminal_states:
@@ -26,14 +27,18 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  default_runtime: codex
-  max_concurrent_agents: 10
+  default_runtime: claude
+  max_concurrent_agents: 4
   max_turns: 20
   runtime_by_label:
     agent:codex: codex
     agent:claude: claude
     agent:cursor: cursor
     agent:gemini: gemini
+    reviewer:codex: codex
+    reviewer:claude: claude
+    reviewer:cursor: cursor
+    reviewer:gemini: gemini
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -92,8 +97,13 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:claude` → Claude CLI
 - `agent:cursor` → Cursor CLI
 - `agent:gemini` → Gemini CLI
+- `reviewer:codex` → Codex app-server during `Agent Review`
+- `reviewer:claude` → Claude CLI during `Agent Review`
+- `reviewer:cursor` → Cursor CLI during `Agent Review`
+- `reviewer:gemini` → Gemini CLI during `Agent Review`
 
-When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
+When no matching label is present, Symphony uses `agent.default_runtime` (`claude` by default).
+When the issue is in `Agent Review`, `reviewer:*` labels take precedence over `agent:*` labels so the implementation agent and reviewing agent can differ.
 
 ### Gemini vs Antigravity
 
@@ -172,6 +182,7 @@ Allowed commit types are fixed: `test:`, `docs:`, `impl:`, `chore:`, `feat:`, an
 - `Todo` -> queued; immediately transition to `In Progress` before active work.
   - Special case: if a PR is already attached, treat as feedback/rework loop (run full PR feedback sweep, address or explicitly push back, revalidate, return to `Human Review`).
 - `In Progress` -> implementation actively underway.
+- `Agent Review` -> PR is ready for an agent review. If issues are found, move to Rework; otherwise move to Human Review.
 - `Human Review` -> PR is attached and validated; waiting on human approval.
 - `Merging` -> approved by human; execute the `land` skill flow (do not call `gh pr merge` directly).
 - `Rework` -> reviewer requested changes; planning + implementation required.
@@ -186,6 +197,7 @@ Allowed commit types are fixed: `test:`, `docs:`, `impl:`, `chore:`, `feat:`, an
    - `Todo` -> immediately move to `In Progress`, then ensure bootstrap workpad comment exists (create if missing), then start execution flow.
      - If PR is already attached, start by reviewing all open PR comments and deciding required changes vs explicit pushback responses.
    - `In Progress` -> continue execution flow from current scratchpad comment.
+   - `Agent Review` -> run the `code-review` skill. Review the PR and workpad checklist. If issues are found, leave comments, restore the developer's `agent:*` label, and move to `Rework`. If approved, move to `Human Review`.
    - `Human Review` -> wait and poll for decision/review updates.
    - `Merging` -> on entry, open and follow `.codex/skills/land/SKILL.md`; do not call `gh pr merge` directly.
    - `Rework` -> run rework flow.
@@ -259,7 +271,7 @@ Use this only when completion is blocked by missing required tools or missing au
   - exact human action needed to unblock.
 - Keep the brief concise and action-oriented; do not add extra top-level comments outside the workpad.
 
-## Step 2: Execution phase (Todo -> In Progress -> Human Review)
+## Step 2: Execution phase (Todo -> In Progress -> Agent Review)
 
 1.  Determine current repo state (`branch`, `git status`, `HEAD`) and verify the kickoff `pull` sync result is already recorded in the workpad before implementation continues.
 2.  If current issue state is `Todo`, move it to `In Progress`; otherwise leave the current state unchanged.
@@ -290,7 +302,7 @@ Use this only when completion is blocked by missing required tools or missing au
     - Do not include PR URL in the workpad comment; keep PR linkage on the issue via attachment/link fields.
     - Add a short `### Confusions` section at the bottom when any part of task execution was unclear/confusing, with concise bullets.
     - Do not post any additional completion summary comment.
-11. Before moving to `Human Review`, poll PR feedback and checks:
+11. Before moving to `Agent Review`, poll PR feedback and checks:
     - Read the PR `Manual QA Plan` comment (when present) and use it to sharpen UI/runtime test coverage for the current change.
     - Run the full PR feedback sweep protocol.
     - Confirm PR checks are passing (green) after the latest changes.
@@ -298,26 +310,36 @@ Use this only when completion is blocked by missing required tools or missing au
     - Confirm every required ticket-provided validation/test-plan item is explicitly marked complete in the workpad.
     - Repeat this check-address-verify loop until no outstanding comments remain and checks are fully passing.
     - Re-open and refresh the workpad before state transition so `Plan`, `Acceptance Criteria`, and `Validation` exactly match completed work.
-12. Only then move issue to `Human Review`.
+12. Only then prepare to move the issue to `Agent Review`.
+    - Check if the issue has a `reviewer:*` label (e.g. `reviewer:gemini`, `reviewer:codex`).
+    - If a specific reviewer label is present, leave it in place; Symphony will prefer it while the issue is in `Agent Review`.
+    - If no reviewer label is present, add `reviewer:gemini` before moving to `Agent Review`; do not rely on `agent.default_runtime` for review routing.
+    - Finally, move the issue to `Agent Review`.
     - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions.
 13. For `Todo` tickets that already had a PR attached at kickoff:
     - Ensure all existing PR feedback was reviewed and resolved, including inline review comments (code changes or explicit, justified pushback response).
     - Ensure branch was pushed with any required updates.
-    - Then move to `Human Review`.
+    - Then move to `Agent Review` (applying the same reviewer label logic as step 12).
 
-## Step 3: Human Review and merge handling
+## Step 3: Agent Review, Human Review and merge handling
 
-1. When the issue is in `Human Review`, do not code or change ticket content.
-2. Poll for updates as needed, including GitHub PR review comments from humans and bots.
-3. If review feedback requires changes, move the issue to `Rework` and follow the rework flow.
-4. If approved, human moves the issue to `Merging`.
-5. When the issue is in `Merging`, open and follow `.codex/skills/land/SKILL.md`, then run the `land` skill in a loop until the PR is merged. Do not call `gh pr merge` directly.
-6. After merge is complete, move the issue to `Done`.
+1. When the issue is in `Agent Review`, the designated reviewing agent should execute the `code-review` skill.
+   - Use `requesting-code-review` and superpowers TDD tools for code review if needed.
+   - Update the workpad `### Agent Review` section with review status, reviewer identity, findings, required fixes, and verification expectations.
+   - If the code has issues, record each issue as an unchecked finding in `### Agent Review`, move the issue to `Rework`, and restore the original `agent:*` label so the implementation agent can fix them.
+   - If the code passes review, mark the review status as approved in `### Agent Review` and move the issue to `Human Review`.
+2. When the issue is in `Human Review`, do not code or change ticket content.
+3. Poll for updates as needed, including GitHub PR review comments from humans and bots.
+4. If review feedback requires changes, move the issue to `Rework` and follow the rework flow.
+5. If approved, human moves the issue to `Merging`.
+6. When the issue is in `Merging`, open and follow `.codex/skills/land/SKILL.md`, then run the `land` skill in a loop until the PR is merged. Do not call `gh pr merge` directly.
+7. After merge is complete, move the issue to `Done`.
 
 ## Step 4: Rework handling
 
 1. Treat `Rework` as a full approach reset, not incremental patching.
 2. Re-read the full issue body and all human comments; explicitly identify what will be done differently this attempt.
+   - Read the workpad `### Agent Review` section first and convert every unchecked finding into the new plan/validation checklist.
 3. Close the existing PR tied to the issue.
 4. Remove the existing `## Codex Workpad` comment from the issue.
 5. Create a fresh branch from `origin/main`.
@@ -326,7 +348,7 @@ Use this only when completion is blocked by missing required tools or missing au
    - Create a new bootstrap `## Codex Workpad` comment.
    - Build a fresh plan/checklist and execute end-to-end.
 
-## Completion bar before Human Review
+## Completion bar before Agent Review
 
 - Step 1/2 checklist is fully complete and accurately reflected in the single workpad comment.
 - Acceptance criteria and required ticket-provided validation items are complete.
@@ -351,7 +373,7 @@ Use this only when completion is blocked by missing required tools or missing au
   title/description/acceptance criteria, same-project assignment, a `related`
   link to the current issue, and `blockedBy` when the follow-up depends on the
   current issue.
-- Do not move to `Human Review` unless the `Completion bar before Human Review` is satisfied.
+- Do not move to `Agent Review` unless the `Completion bar before Agent Review` is satisfied.
 - In `Human Review`, do not make changes; wait and poll.
 - If state is terminal (`Done`), do nothing and shut down.
 - Keep issue text concise, specific, and reviewer-oriented.
@@ -387,6 +409,17 @@ Use this exact structure for the persistent workpad comment and keep it updated 
 ### Notes
 
 - <short progress note with timestamp>
+
+### Agent Review
+
+- [ ] Status: `pending | changes requested | approved`
+- Reviewer: `<agent/runtime or person>`
+- Findings:
+  - [ ] `<finding with file/line, risk, and required fix>`
+- Verification requested:
+  - [ ] `<command, check, or evidence the fixer must provide>`
+- Resolution notes:
+  - <how each finding was fixed or why it was explicitly declined>
 
 ### Confusions
 

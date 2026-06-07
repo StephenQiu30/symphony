@@ -76,11 +76,39 @@ defmodule SymphonyElixir.Config do
 
   defp issue_label_runtime(nil, _settings), do: nil
 
+  defp issue_label_runtime(%{labels: labels, state: state}, settings)
+       when is_list(labels) and is_binary(state) do
+    if Schema.normalize_issue_state(state) == "agent review" do
+      reviewer_label_runtime(labels, settings) || agent_label_runtime(labels, settings)
+    else
+      agent_label_runtime(labels, settings)
+    end
+  end
+
   defp issue_label_runtime(%{labels: labels}, settings) when is_list(labels) do
+    agent_label_runtime(labels, settings)
+  end
+
+  defp issue_label_runtime(_issue, _settings), do: nil
+
+  defp reviewer_label_runtime(labels, settings) do
+    labels
+    |> Enum.map(&Schema.normalize_label/1)
+    |> Enum.filter(&String.starts_with?(&1, "reviewer:"))
+    |> mapped_label_runtime(settings)
+  end
+
+  defp agent_label_runtime(labels, settings) do
+    labels
+    |> Enum.map(&Schema.normalize_label/1)
+    |> Enum.filter(&String.starts_with?(&1, "agent:"))
+    |> mapped_label_runtime(settings)
+  end
+
+  defp mapped_label_runtime(labels, settings) do
     label_map = settings.agent.runtime_by_label || %{}
 
     labels
-    |> Enum.map(&Schema.normalize_label/1)
     |> Enum.find_value(fn label ->
       case Map.get(label_map, label) do
         "codex" -> :codex
@@ -91,8 +119,6 @@ defmodule SymphonyElixir.Config do
       end
     end)
   end
-
-  defp issue_label_runtime(_issue, _settings), do: nil
 
   defp default_agent_runtime(settings) do
     case settings.agent.default_runtime do

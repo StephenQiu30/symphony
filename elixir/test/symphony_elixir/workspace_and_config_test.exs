@@ -981,6 +981,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         agent:claude: claude
         agent:cursor: cursor
         agent:gemini: gemini
+        reviewer:claude: claude
         reviewer:codex: codex
         reviewer:gemini: gemini
     claude:
@@ -1009,12 +1010,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "Agent Review",
              labels: ["agent:claude"]
-           }) == :gemini
+           }) == :claude
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "Agent Review",
              labels: ["review:gemini", "agent:claude"]
-           }) == :gemini
+           }) == :claude
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "In Progress",

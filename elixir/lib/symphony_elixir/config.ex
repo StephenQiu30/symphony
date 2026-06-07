@@ -121,7 +121,7 @@ defmodule SymphonyElixir.Config do
   end
 
   defp default_reviewer_runtime(settings) do
-    mapped_label_runtime(["reviewer:gemini"], settings)
+    mapped_label_runtime(["reviewer:claude"], settings)
   end
 
   defp default_agent_runtime(settings) do

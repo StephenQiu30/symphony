@@ -311,9 +311,9 @@ Use this only when completion is blocked by missing required tools or missing au
     - Repeat this check-address-verify loop until no outstanding comments remain and checks are fully passing.
     - Re-open and refresh the workpad before state transition so `Plan`, `Acceptance Criteria`, and `Validation` exactly match completed work.
 12. Only then prepare to move the issue to `Agent Review`.
-    - Check if the issue has a `reviewer:*` label (e.g. `reviewer:gemini`, `reviewer:codex`).
+    - Check if the issue has a `reviewer:*` label (e.g. `reviewer:claude`, `reviewer:codex`).
     - If a specific reviewer label is present, leave it in place; Symphony will prefer it while the issue is in `Agent Review`.
-    - If no reviewer label is present, add `reviewer:gemini` before moving to `Agent Review`; do not rely on `agent.default_runtime` for review routing.
+    - If no reviewer label is present, add `reviewer:claude` before moving to `Agent Review`; do not rely on `agent.default_runtime` for review routing.
     - Finally, move the issue to `Agent Review`.
     - Exception: if blocked by missing required non-GitHub tools/auth per the blocked-access escape hatch, move to `Human Review` with the blocker brief and explicit unblock actions.
 13. For `Todo` tickets that already had a PR attached at kickoff:

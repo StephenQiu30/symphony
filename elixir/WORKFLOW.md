@@ -312,7 +312,7 @@ Use this only when completion is blocked by missing required tools or missing au
     - Do not post any additional completion summary comment.
 11. Before moving to `Agent Review`, poll PR feedback and checks:
     - Run `.codex/skills/openspec-verify-change/SKILL.md` and compare implementation, validation evidence, and PR/workpad notes against the current OpenSpec artifacts.
-    - Archive the verified OpenSpec change with `.codex/skills/openspec-archive-change/SKILL.md`; unarchived changes fail the handoff gate.
+    - If verification passes with no critical findings, immediately archive the OpenSpec task/change with `.codex/skills/openspec-archive-change/SKILL.md`; unarchived changes fail the handoff gate and cannot move to `Human Review`.
     - Read the PR `Manual QA Plan` comment (when present) and use it to sharpen UI/runtime test coverage for the current change.
     - Run the full PR feedback sweep protocol.
     - Confirm PR checks are passing (green) after the latest changes.

@@ -132,6 +132,7 @@ The agent should be able to talk to Linear, either via a configured Linear MCP s
 - Start by determining the ticket's current status, then follow the matching flow for that status.
 - Start every task by locating or creating the relevant OpenSpec change artifacts and use them as the SDD source of truth during execution.
 - Every task must have an active OpenSpec change before implementation starts; no change means no coding, no review, and no handoff.
+- Standard SDD means spec first: clarify proposal/specs/design/tasks until expected behavior, scope boundaries, validation, and non-goals are clear enough to drive development.
 - Start every task by opening the tracking workpad comment and bringing it up to date before doing new implementation work.
 - Spend extra effort up front on planning and verification design before implementation.
 - Reproduce first: always confirm the current behavior/issue signal before changing code so the fix target is explicit.
@@ -238,10 +239,11 @@ Allowed commit types are fixed: `test:`, `docs:`, `impl:`, `chore:`, `feat:`, an
 7.  Add an `OpenSpec` section naming the active change and linking proposal/specs/design/tasks.
 8.  Add a `Test-first Evidence` section to the workpad that names the failing test, acceptance script, or executable validation that will prove the change.
 9.  Open and follow `.codex/skills/openspec-new-change/SKILL.md` or `.codex/skills/openspec-continue-change/SKILL.md` first, then `.codex/skills/writing-plans/SKILL.md`; refine the workpad plan from their output and link the OpenSpec artifacts in the workpad.
-10. Run a principal-style self-review of the plan and refine it in the comment.
-11. Before implementing, capture a concrete reproduction signal and record it in the workpad `Notes` section (command/output, screenshot, or deterministic UI behavior).
-12. Open and follow `.codex/skills/test-driven-development/SKILL.md`; red/green evidence must map back to the active OpenSpec tasks.
-13. Run the `pull` skill to sync with latest `origin/main` before any code edits, then record the pull/sync result in the workpad `Notes`.
+10. Standard SDD gate: do not code from issue prose alone; ensure the active OpenSpec artifacts define the behavior and validation that will drive implementation.
+11. Run a principal-style self-review of the plan and refine it in the comment.
+12. Before implementing, capture a concrete reproduction signal and record it in the workpad `Notes` section (command/output, screenshot, or deterministic UI behavior).
+13. Open and follow `.codex/skills/test-driven-development/SKILL.md`; red/green evidence must map back to the active OpenSpec tasks.
+14. Run the `pull` skill to sync with latest `origin/main` before any code edits, then record the pull/sync result in the workpad `Notes`.
     - Include a `pull skill evidence` note with:
       - merge source(s),
       - result (`clean` or `conflicts resolved`),
@@ -331,8 +333,9 @@ Use this only when completion is blocked by missing required tools or missing au
 
 ## Step 3: Agent Review, Human Review and merge handling
 
-1. When the issue is in `Agent Review`, the designated reviewing agent should execute the `code-review` skill and compare the delivered change against the linked OpenSpec proposal/specs/design/tasks and `openspec/specs/` baseline.
+1. When the issue is in `Agent Review`, the designated reviewing agent must open and follow `.codex/skills/receiving-code-review/SKILL.md`, then execute the `code-review` skill and compare the delivered change against the linked OpenSpec proposal/specs/design/tasks and `openspec/specs/` baseline.
    - Functional Review is mandatory: inspect implementation logic for requirement gaps, regressions, security or data-flow bugs, and false completion where the workpad or PR claims done while functionality is still missing.
+   - Apply `receiving-code-review` rigor to every finding: understand the requirement, verify it against codebase reality, evaluate technical correctness, and only then approve, request rework, or push back with evidence.
    - Use `requesting-code-review` and superpowers TDD tools for code review if needed.
    - Update the workpad `### Agent Review` section with review status, reviewer identity, findings, required fixes, and verification expectations.
    - If the code has issues, missing functionality, unverified acceptance criteria, an unarchived OpenSpec change, or false completion, record each issue as an unchecked finding in `### Agent Review`, move the issue to `Rework`, and restore the original `agent:*` label so the implementation agent can fix them. Do not move to `Human Review` from a failed agent review.

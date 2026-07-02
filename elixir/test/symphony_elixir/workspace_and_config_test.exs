@@ -970,7 +970,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.settings!().worker.max_concurrent_agents_per_host == 2
   end
 
-  test "config supports claude cursor and gemini runtime selection" do
+  test "config supports antigravity runtime selection" do
     workflow = """
     ---
     tracker:
@@ -980,16 +980,16 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       runtime_by_label:
         agent:claude: claude
         agent:cursor: cursor
-        agent:gemini: gemini
+        agent:antigravity: antigravity
         reviewer:claude: claude
         reviewer:codex: codex
-        reviewer:gemini: gemini
+        reviewer:antigravity: antigravity
     claude:
       command: claude
     cursor:
       command: cursor-agent
-    gemini:
-      command: gemini
+    antigravity:
+      command: agy --dangerously-skip-permissions
     ---
     Runtime prompt body.
     """
@@ -1000,12 +1000,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.agent_runtime() == :codex
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:claude"]}) == :claude
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:cursor"]}) == :cursor
-    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:gemini"]}) == :gemini
+    assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{labels: ["agent:antigravity"]}) == :antigravity
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "Agent Review",
-             labels: ["agent:claude", "reviewer:gemini"]
-           }) == :gemini
+             labels: ["agent:claude", "reviewer:antigravity"]
+           }) == :antigravity
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "Agent Review",
@@ -1014,20 +1014,20 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "Agent Review",
-             labels: ["review:gemini", "agent:claude"]
+             labels: ["review:antigravity", "agent:claude"]
            }) == :claude
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "In Progress",
-             labels: ["agent:claude", "reviewer:gemini"]
+             labels: ["agent:claude", "reviewer:antigravity"]
            }) == :claude
 
     assert Config.agent_runtime(%SymphonyElixir.Linear.Issue{
              state: "Todo",
-             labels: ["reviewer:gemini", "agent:claude"]
+             labels: ["reviewer:antigravity", "agent:claude"]
            }) == :claude
 
-    assert Config.runtime_settings(:gemini).command == "gemini"
+    assert Config.runtime_settings(:antigravity).command == "agy --dangerously-skip-permissions"
     assert :ok = Config.validate!()
   end
 

@@ -61,7 +61,7 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
-  @type runtime :: :codex | :claude | :cursor | :antigravity
+  @type runtime :: :codex | :claude | :cursor
 
   @spec agent_runtime() :: runtime()
   @spec agent_runtime(term()) :: runtime()
@@ -116,8 +116,6 @@ defmodule SymphonyElixir.Config do
         "codex" -> :codex
         "claude" -> :claude
         "cursor" -> :cursor
-
-        "antigravity" -> :antigravity
         _ -> nil
       end
     end)
@@ -132,8 +130,6 @@ defmodule SymphonyElixir.Config do
       "codex" -> :codex
       "claude" -> :claude
       "cursor" -> :cursor
-
-      "antigravity" -> :antigravity
       _ -> :codex
     end
   end
@@ -142,8 +138,6 @@ defmodule SymphonyElixir.Config do
   def runtime_settings(:codex), do: settings!().codex
   def runtime_settings(:claude), do: settings!().claude
   def runtime_settings(:cursor), do: settings!().cursor
-
-  def runtime_settings(:antigravity), do: settings!().antigravity
 
   @spec runtime_protocol(runtime()) :: String.t()
   def runtime_protocol(runtime), do: runtime_settings(runtime).protocol
@@ -222,9 +216,8 @@ defmodule SymphonyElixir.Config do
   end
 
   defp validate_semantics(settings) do
-    with :ok <- validate_tracker(settings),
-         :ok <- validate_runtime_commands(settings) do
-      :ok
+    with :ok <- validate_tracker(settings) do
+      validate_runtime_commands(settings)
     end
   end
 
@@ -282,8 +275,6 @@ defmodule SymphonyElixir.Config do
   defp runtime_atom("codex"), do: :codex
   defp runtime_atom("claude"), do: :claude
   defp runtime_atom("cursor"), do: :cursor
-
-  defp runtime_atom("antigravity"), do: :antigravity
   defp runtime_atom(_), do: nil
 
   defp format_config_error(reason) do

@@ -34,11 +34,9 @@ agent:
     agent:codex: codex
     agent:claude: claude
     agent:cursor: cursor
-    agent:antigravity: antigravity
     reviewer:codex: codex
     reviewer:claude: claude
     reviewer:cursor: cursor
-    reviewer:antigravity: antigravity
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -52,8 +50,6 @@ claude:
 cursor:
   command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
   prompt_mode: argument
-antigravity:
-  command: agy --dangerously-skip-permissions
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -96,27 +92,12 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:codex` → Codex app-server
 - `agent:claude` → Claude CLI
 - `agent:cursor` → Cursor CLI
-- `agent:antigravity` → Antigravity CLI
 - `reviewer:codex` → Codex app-server during `Agent Review`
 - `reviewer:claude` → Claude CLI during `Agent Review`
 - `reviewer:cursor` → Cursor CLI during `Agent Review`
-- `reviewer:antigravity` → Antigravity CLI during `Agent Review`
 
 When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
 When the issue is in `Agent Review`, `reviewer:*` labels take precedence over `agent:*` labels so the implementation agent and reviewing agent can differ.
-
-### Antigravity runtime
-
-Use `agent:antigravity` and `reviewer:antigravity` to select Antigravity CLI.
-The `antigravity.command` setting uses `agy -p` one-shot mode.
-
-Before starting unattended Symphony retries, verify the same shell can run:
-
-```sh
-agy --dangerously-skip-permissions -p "health check"
-```
-
-If Antigravity reports login/session/model errors, fix Antigravity auth first.
 
 ## Prerequisite: Linear access is available
 

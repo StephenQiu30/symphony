@@ -194,30 +194,34 @@ defmodule SymphonyElixir.Codex.AppServer do
       remote_command = remote_launch_command(runtime, workspace, model)
       SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
     else
-      executable = System.find_executable("bash")
+      case System.find_executable("bash") do
+        nil ->
+          {:error, :bash_not_found}
 
-      if is_nil(executable) do
-        {:error, :bash_not_found}
-      else
-        command = Config.runtime_settings(runtime).command
-        command = if model, do: "#{command} --model=#{model}", else: command
-
-        port =
-          Port.open(
-            {:spawn_executable, String.to_charlist(executable)},
-            [
-              :binary,
-              :exit_status,
-              :stderr_to_stdout,
-              args: [~c"-lc", String.to_charlist(command)],
-              cd: String.to_charlist(workspace),
-              line: @port_line_bytes
-            ]
-          )
-
-        {:ok, port}
+        executable ->
+          start_local_port(executable, runtime, workspace, model)
       end
     end
+  end
+
+  defp start_local_port(executable, runtime, workspace, model) do
+    command = Config.runtime_settings(runtime).command
+    command = if model, do: "#{command} --model=#{model}", else: command
+
+    port =
+      Port.open(
+        {:spawn_executable, String.to_charlist(executable)},
+        [
+          :binary,
+          :exit_status,
+          :stderr_to_stdout,
+          args: [~c"-lc", String.to_charlist(command)],
+          cd: String.to_charlist(workspace),
+          line: @port_line_bytes
+        ]
+      )
+
+    {:ok, port}
   end
 
   defp remote_launch_command(runtime, workspace, model) when is_binary(workspace) do

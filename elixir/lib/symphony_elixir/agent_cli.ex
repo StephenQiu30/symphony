@@ -4,10 +4,10 @@ defmodule SymphonyElixir.AgentCli do
   require Logger
   alias SymphonyElixir.{Config, SSH}
 
-  @type runtime :: :claude | :cursor | :antigravity
+  @type runtime :: :claude | :cursor
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :antigravity] do
+  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor] do
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
     metadata = %{cli_agent_runtime: to_string(runtime), cli_agent_session_id: session_id}
@@ -17,7 +17,13 @@ defmodule SymphonyElixir.AgentCli do
     case start_port(runtime, workspace, prompt, opts) do
       {:ok, port} ->
         metadata = Map.merge(metadata, port_metadata(port))
-        emit_message(on_message, :session_started, %{session_id: session_id, thread_id: session_id, turn_id: "turn-1"}, metadata)
+
+        emit_message(
+          on_message,
+          :session_started,
+          %{session_id: session_id, thread_id: session_id, turn_id: "turn-1"},
+          metadata
+        )
 
         try do
           await_completion(runtime, port, on_message, session_id, metadata)
@@ -34,60 +40,25 @@ defmodule SymphonyElixir.AgentCli do
   defp start_port(runtime, workspace, prompt, opts) do
     worker_host = Keyword.get(opts, :worker_host)
 
-    cond do
-      is_binary(worker_host) ->
-        SSH.start_port(worker_host, shell_script(runtime, workspace, prompt, opts))
-
-      runtime == :antigravity and windows?() ->
-        start_windows_antigravity_port(workspace, prompt, opts)
-
-      true ->
-        case System.find_executable("bash") do
-          nil ->
-            {:error, :bash_not_found}
-
-          executable ->
-            port =
-              Port.open({:spawn_executable, String.to_charlist(executable)}, [
-                :binary,
-                :exit_status,
-                :stderr_to_stdout,
-                args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt, opts))],
-                cd: String.to_charlist(workspace)
-              ])
-
-            {:ok, port}
-        end
-    end
-  end
-
-  defp start_windows_antigravity_port(workspace, prompt, opts) do
-    with powershell when is_binary(powershell) <- windows_powershell_command(),
-         cmd when is_binary(cmd) <- System.find_executable("cmd.exe") || System.find_executable("cmd") do
-      command_line =
-        [
-          powershell,
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-EncodedCommand",
-          powershell_encoded_command(windows_antigravity_script(workspace, prompt, opts))
-        ]
-        |> Enum.join(" ")
-
-      port =
-        Port.open({:spawn_executable, String.to_charlist(cmd)}, [
-          :binary,
-          :exit_status,
-          :stderr_to_stdout,
-          args: [~c"/d", ~c"/c", String.to_charlist(command_line)],
-          cd: String.to_charlist(workspace)
-        ])
-
-      {:ok, port}
+    if is_binary(worker_host) do
+      SSH.start_port(worker_host, shell_script(runtime, workspace, prompt, opts))
     else
-      nil ->
-        {:error, :windows_shell_not_found}
+      case System.find_executable("bash") do
+        nil ->
+          {:error, :bash_not_found}
+
+        executable ->
+          port =
+            Port.open({:spawn_executable, String.to_charlist(executable)}, [
+              :binary,
+              :exit_status,
+              :stderr_to_stdout,
+              args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt, opts))],
+              cd: String.to_charlist(workspace)
+            ])
+
+          {:ok, port}
+      end
     end
   end
 
@@ -106,36 +77,6 @@ defmodule SymphonyElixir.AgentCli do
       launch_command(runtime, settings, model)
     ]
     |> Enum.join("\n")
-  end
-
-  defp windows_antigravity_script(workspace, prompt, opts) do
-    settings = Config.runtime_settings(:antigravity)
-    model = Keyword.get(opts, :model)
-    command = if model, do: "#{settings.command} --model=#{model}", else: settings.command
-    command = headless_command(:antigravity, command)
-
-    [
-      "$ErrorActionPreference = 'Stop'",
-      "Set-Location -LiteralPath #{powershell_string(workspace)}",
-      "$promptFile = Join-Path (Get-Location) ('.symphony-antigravity-prompt.' + [System.IO.Path]::GetRandomFileName())",
-      "function Quote-ForPowerShell([string]$Value) { \"'\" + $Value.Replace(\"'\", \"''\") + \"'\" }",
-      "try {",
-      "  [System.IO.File]::WriteAllText($promptFile, [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(#{powershell_string(Base.encode64(prompt))})), [System.Text.Encoding]::UTF8)",
-      "  $prompt = Get-Content -Raw -LiteralPath $promptFile",
-      "  Invoke-Expression (#{powershell_string(command)} + ' -p ' + (Quote-ForPowerShell $prompt))",
-      "  exit $LASTEXITCODE",
-      "} finally {",
-      "  Remove-Item -LiteralPath $promptFile -Force -ErrorAction SilentlyContinue",
-      "}"
-    ]
-    |> Enum.join("\n")
-  end
-
-
-
-  defp launch_command(:antigravity, %{command: command}, model) do
-    command = if model, do: "#{command} --model=#{model}", else: command
-    "#{headless_command(:antigravity, command)} -p \"$(cat \"$prompt_file\")\""
   end
 
   defp launch_command(runtime, %{command: command, prompt_mode: "argument"}, model) do
@@ -167,12 +108,6 @@ defmodule SymphonyElixir.AgentCli do
     |> ensure_flag(~r/(^|\s)--approve-mcps(\s|$)/, "--approve-mcps")
   end
 
-
-
-  defp headless_command(:antigravity, command) do
-    ensure_flag(command, ~r/(^|\s)--dangerously-skip-permissions(\s|$)/, "--dangerously-skip-permissions")
-  end
-
   defp ensure_flag(command, pattern, flag) do
     if Regex.match?(pattern, command), do: command, else: command <> " " <> flag
   end
@@ -191,15 +126,27 @@ defmodule SymphonyElixir.AgentCli do
   end
 
   defp ensure_json_output(command, output_format) do
-    if Regex.match?(~r/(^|\s)--output-format(\s|=)/, command), do: command, else: command <> " --output-format " <> output_format
+    if Regex.match?(~r/(^|\s)--output-format(\s|=)/, command) do
+      command
+    else
+      command <> " --output-format " <> output_format
+    end
   end
 
   defp await_completion(runtime, port, on_message, session_id, metadata) do
-    receive_loop(runtime, port, on_message, metadata, Config.runtime_settings(runtime).turn_timeout_ms, "", %{
-      failed_payload: nil,
-      result_payload: nil,
-      session_id: session_id
-    })
+    receive_loop(
+      runtime,
+      port,
+      on_message,
+      metadata,
+      Config.runtime_settings(runtime).turn_timeout_ms,
+      "",
+      %{
+        failed_payload: nil,
+        result_payload: nil,
+        session_id: session_id
+      }
+    )
   end
 
   defp receive_loop(runtime, port, on_message, metadata, timeout_ms, pending_line, state) do
@@ -248,7 +195,14 @@ defmodule SymphonyElixir.AgentCli do
           drain_available_port_output(port, on_message, metadata, pending_line, state)
 
         state = flush_pending_cli_line(on_message, metadata, pending_line, state)
-        emit_message(on_message, :turn_ended_with_error, %{session_id: state.session_id, reason: :turn_timeout}, metadata)
+
+        emit_message(
+          on_message,
+          :turn_ended_with_error,
+          %{session_id: state.session_id, reason: :turn_timeout},
+          metadata
+        )
+
         {:error, :turn_timeout}
     end
   end
@@ -271,8 +225,11 @@ defmodule SymphonyElixir.AgentCli do
     receive do
       {^port, {:data, chunk}} when is_binary(chunk) ->
         case process_cli_chunk(:unknown, on_message, metadata, pending_line, chunk, state) do
-          {:ok, pending_line, state} -> drain_available_port_output(port, on_message, metadata, pending_line, state)
-          {:error, _reason, state} -> {pending_line, state}
+          {:ok, pending_line, state} ->
+            drain_available_port_output(port, on_message, metadata, pending_line, state)
+
+          {:error, _reason, state} ->
+            {pending_line, state}
         end
 
       {^port, {:data, {:eol, chunk}}} ->
@@ -308,13 +265,18 @@ defmodule SymphonyElixir.AgentCli do
     {lines, pending_line}
   end
 
-
-
   defp interactive_prompt_reason(_runtime, _output), do: nil
 
   defp complete_cli_turn(runtime, on_message, metadata, %{failed_payload: failed_payload} = state) when is_map(failed_payload) do
     reason = {:cli_agent_failed, runtime, failed_payload}
-    emit_message(on_message, :turn_failed, %{session_id: state.session_id, payload: failed_payload, reason: reason}, metadata)
+
+    emit_message(
+      on_message,
+      :turn_failed,
+      %{session_id: state.session_id, payload: failed_payload, reason: reason},
+      metadata
+    )
+
     {:error, reason}
   end
 
@@ -325,8 +287,20 @@ defmodule SymphonyElixir.AgentCli do
       |> Map.put_new("subtype", "success")
       |> Map.put("session_id", state.session_id)
 
-    emit_message(on_message, :turn_completed, %{session_id: state.session_id, payload: payload}, metadata)
-    {:ok, %{result: :turn_completed, session_id: state.session_id, thread_id: state.session_id, turn_id: "turn-1"}}
+    emit_message(
+      on_message,
+      :turn_completed,
+      %{session_id: state.session_id, payload: payload},
+      metadata
+    )
+
+    {:ok,
+     %{
+       result: :turn_completed,
+       session_id: state.session_id,
+       thread_id: state.session_id,
+       turn_id: "turn-1"
+     }}
   end
 
   defp cli_exit_reason(runtime, _status, %{failed_payload: failed_payload}) when is_map(failed_payload) do
@@ -419,27 +393,4 @@ defmodule SymphonyElixir.AgentCli do
   defp issue_context(%{id: issue_id, identifier: identifier}), do: "issue_id=#{issue_id} issue_identifier=#{identifier}"
 
   defp shell_escape(value), do: "'" <> String.replace(value, "'", "'\"'\"'") <> "'"
-
-  defp powershell_string(value), do: "'" <> String.replace(value, "'", "''") <> "'"
-
-  defp powershell_encoded_command(script) do
-    script
-    |> :unicode.characters_to_binary(:utf8, {:utf16, :little})
-    |> Base.encode64()
-  end
-
-  defp windows_powershell_command do
-    cond do
-      System.find_executable("powershell.exe") -> "powershell.exe"
-      System.find_executable("powershell") -> "powershell"
-      true -> nil
-    end
-  end
-
-  defp windows? do
-    case :os.type() do
-      {:win32, _name} -> true
-      _ -> false
-    end
-  end
 end

@@ -96,17 +96,15 @@ defmodule SymphonyElixir.CLI do
   defp load_dotenv_line(line) do
     line = String.trim(line)
 
-    cond do
-      line == "" or String.starts_with?(line, "#") ->
-        :ok
+    if line == "" or String.starts_with?(line, "#") do
+      :ok
+    else
+      line = String.replace_prefix(line, "export ", "")
 
-      true ->
-        line = String.replace_prefix(line, "export ", "")
-
-        case String.split(line, "=", parts: 2) do
-          [key, value] -> maybe_put_dotenv_var(String.trim(key), normalize_dotenv_value(value))
-          _other -> :ok
-        end
+      case String.split(line, "=", parts: 2) do
+        [key, value] -> maybe_put_dotenv_var(String.trim(key), normalize_dotenv_value(value))
+        _other -> :ok
+      end
     end
   end
 

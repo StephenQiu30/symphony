@@ -27,18 +27,18 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  default_runtime: claude
+  default_runtime: antigravity
   max_concurrent_agents: 4
   max_turns: 20
   runtime_by_label:
     agent:codex: codex
     agent:claude: claude
     agent:cursor: cursor
-    agent:gemini: gemini
+    agent:antigravity: antigravity
     reviewer:codex: codex
     reviewer:claude: claude
     reviewer:cursor: cursor
-    reviewer:gemini: gemini
+    reviewer:antigravity: antigravity
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
@@ -52,8 +52,8 @@ claude:
 cursor:
   command: cursor-agent -p --force --sandbox disabled --output-format stream-json --stream-partial-output --approve-mcps
   prompt_mode: argument
-gemini:
-  command: gemini --skip-trust --approval-mode yolo
+antigravity:
+  command: agy --dangerously-skip-permissions
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
@@ -96,32 +96,27 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `agent:codex` → Codex app-server
 - `agent:claude` → Claude CLI
 - `agent:cursor` → Cursor CLI
-- `agent:gemini` → Gemini CLI
+- `agent:antigravity` → Antigravity CLI
 - `reviewer:codex` → Codex app-server during `Agent Review`
 - `reviewer:claude` → Claude CLI during `Agent Review`
 - `reviewer:cursor` → Cursor CLI during `Agent Review`
-- `reviewer:gemini` → Gemini CLI during `Agent Review`
+- `reviewer:antigravity` → Antigravity CLI during `Agent Review`
 
-When no matching label is present, Symphony uses `agent.default_runtime` (`claude` by default).
+When no matching label is present, Symphony uses `agent.default_runtime` (`antigravity` by default).
 When the issue is in `Agent Review`, `reviewer:*` labels take precedence over `agent:*` labels so the implementation agent and reviewing agent can differ.
 
-### Gemini vs Antigravity
+### Antigravity runtime
 
-The `gemini.command` setting is for the Gemini CLI headless `stream-json`
-protocol. It does not automatically use Antigravity just because
-`~/.gemini/antigravity` exists. If this project should run through
-Antigravity, first verify a healthy Antigravity Agent API session from the same
-shell:
+Use `agent:antigravity` and `reviewer:antigravity` to select Antigravity CLI.
+The `antigravity.command` setting uses `agy -p` one-shot mode.
+
+Before starting unattended Symphony retries, verify the same shell can run:
 
 ```sh
-ANTIGRAVITY_LS_ADDRESS=127.0.0.1:<grpc-port> \
-  ~/.gemini/antigravity/bin/agentapi new-conversation --model=flash "health check"
+agy --dangerously-skip-permissions -p "health check"
 ```
 
-If that command reports missing CSRF token, model fetch failure, or
-`state syncing error: key not found`, the Antigravity login/session is not
-usable by Symphony yet. Do not start unattended Symphony retries in that state;
-fix Antigravity auth first or keep using the Gemini CLI command above.
+If Antigravity reports login/session/model errors, fix Antigravity auth first.
 
 ## Prerequisite: Linear access is available
 

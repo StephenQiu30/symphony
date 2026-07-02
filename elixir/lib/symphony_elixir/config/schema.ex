@@ -151,7 +151,7 @@ defmodule SymphonyElixir.Config.Schema do
         ],
         empty_values: []
       )
-      |> validate_inclusion(:default_runtime, ["codex", "claude", "cursor", "gemini"])
+      |> validate_inclusion(:default_runtime, ["codex", "claude", "cursor", "antigravity"])
       |> validate_number(:max_concurrent_agents, greater_than: 0)
       |> validate_number(:max_turns, greater_than: 0)
       |> validate_number(:max_retry_backoff_ms, greater_than: 0)
@@ -307,7 +307,8 @@ defmodule SymphonyElixir.Config.Schema do
     embeds_one(:codex, AgentRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:claude, AgentRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:cursor, AgentRuntime, on_replace: :update, defaults_to_struct: true)
-    embeds_one(:gemini, AgentRuntime, on_replace: :update, defaults_to_struct: true)
+
+    embeds_one(:antigravity, AgentRuntime, on_replace: :update, defaults_to_struct: true)
     embeds_one(:hooks, Hooks, on_replace: :update, defaults_to_struct: true)
     embeds_one(:observability, Observability, on_replace: :update, defaults_to_struct: true)
     embeds_one(:server, Server, on_replace: :update, defaults_to_struct: true)
@@ -389,7 +390,9 @@ defmodule SymphonyElixir.Config.Schema do
       Enum.flat_map(runtime_by_label, fn {label, runtime} ->
         cond do
           label == "" -> [{field, "labels must not be blank"}]
-          runtime not in ["codex", "claude", "cursor", "gemini"] -> [{field, "runtime values must be one of codex, claude, cursor, gemini"}]
+          runtime not in ["codex", "claude", "cursor", "antigravity"] ->
+            [{field, "runtime values must be one of codex, claude, cursor, antigravity"}]
+
           true -> []
         end
       end)
@@ -435,7 +438,8 @@ defmodule SymphonyElixir.Config.Schema do
     |> cast_embed(:codex, with: &AgentRuntime.changeset(&1, &2, "app-server", "codex app-server"))
     |> cast_embed(:claude, with: &AgentRuntime.changeset(&1, &2, "cli"))
     |> cast_embed(:cursor, with: &AgentRuntime.changeset(&1, &2, "cli"))
-    |> cast_embed(:gemini, with: &AgentRuntime.changeset(&1, &2, "cli"))
+
+    |> cast_embed(:antigravity, with: &AgentRuntime.changeset(&1, &2, "cli"))
     |> cast_embed(:hooks, with: &Hooks.changeset/2)
     |> cast_embed(:observability, with: &Observability.changeset/2)
     |> cast_embed(:server, with: &Server.changeset/2)
@@ -464,11 +468,22 @@ defmodule SymphonyElixir.Config.Schema do
 
     claude = %{settings.claude | protocol: settings.claude.protocol || "cli"}
     cursor = %{settings.cursor | protocol: settings.cursor.protocol || "cli"}
-    gemini = %{settings.gemini | protocol: settings.gemini.protocol || "cli"}
+
+    antigravity = %{settings.antigravity | protocol: settings.antigravity.protocol || "cli"}
 
     server = %{settings.server | host: resolve_plain_setting(settings.server.host, System.get_env("SYMPHONY_SERVER_HOST") || "0.0.0.0")}
 
-    %{settings | tracker: tracker, workspace: workspace, codex: codex, claude: claude, cursor: cursor, gemini: gemini, server: server}
+    %{
+      settings
+      | tracker: tracker,
+        workspace: workspace,
+        codex: codex,
+        claude: claude,
+        cursor: cursor,
+
+        antigravity: antigravity,
+        server: server
+    }
   end
 
   defp normalize_keys(value) when is_map(value) do

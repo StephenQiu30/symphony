@@ -61,10 +61,8 @@ defmodule SymphonyElixir.Config do
 
   def max_concurrent_agents_for_state(_state_name), do: settings!().agent.max_concurrent_agents
 
-  @type runtime :: :codex | :claude | :cursor | :antigravity
-
-  @spec agent_runtime() :: runtime()
-  @spec agent_runtime(term()) :: runtime()
+  @spec agent_runtime() :: :codex | :claude | :cursor | :gemini
+  @spec agent_runtime(term()) :: :codex | :claude | :cursor | :gemini
   def agent_runtime(issue \\ nil) do
     settings = settings!()
 
@@ -116,8 +114,7 @@ defmodule SymphonyElixir.Config do
         "codex" -> :codex
         "claude" -> :claude
         "cursor" -> :cursor
-
-        "antigravity" -> :antigravity
+        "gemini" -> :gemini
         _ -> nil
       end
     end)
@@ -132,20 +129,18 @@ defmodule SymphonyElixir.Config do
       "codex" -> :codex
       "claude" -> :claude
       "cursor" -> :cursor
-
-      "antigravity" -> :antigravity
+      "gemini" -> :gemini
       _ -> :codex
     end
   end
 
-  @spec runtime_settings(runtime()) :: map()
+  @spec runtime_settings(:codex | :claude | :cursor | :gemini) :: map()
   def runtime_settings(:codex), do: settings!().codex
   def runtime_settings(:claude), do: settings!().claude
   def runtime_settings(:cursor), do: settings!().cursor
+  def runtime_settings(:gemini), do: settings!().gemini
 
-  def runtime_settings(:antigravity), do: settings!().antigravity
-
-  @spec runtime_protocol(runtime()) :: String.t()
+  @spec runtime_protocol(:codex | :claude | :cursor | :gemini) :: String.t()
   def runtime_protocol(runtime), do: runtime_settings(runtime).protocol
 
   @spec agent_model(atom(), map()) :: String.t() | nil
@@ -282,8 +277,7 @@ defmodule SymphonyElixir.Config do
   defp runtime_atom("codex"), do: :codex
   defp runtime_atom("claude"), do: :claude
   defp runtime_atom("cursor"), do: :cursor
-
-  defp runtime_atom("antigravity"), do: :antigravity
+  defp runtime_atom("gemini"), do: :gemini
   defp runtime_atom(_), do: nil
 
   defp format_config_error(reason) do

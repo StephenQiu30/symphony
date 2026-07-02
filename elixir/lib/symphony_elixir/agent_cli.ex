@@ -4,10 +4,10 @@ defmodule SymphonyElixir.AgentCli do
   require Logger
   alias SymphonyElixir.{Config, SSH}
 
-  @type runtime :: :claude | :cursor | :antigravity
+  @type runtime :: :claude | :cursor | :gemini
 
   @spec run(runtime(), Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :antigravity] do
+  def run(runtime, workspace, prompt, issue, opts \\ []) when runtime in [:claude, :cursor, :gemini] do
     on_message = Keyword.get(opts, :on_message, &default_on_message/1)
     session_id = "#{runtime}-#{System.unique_integer([:positive])}"
     metadata = %{cli_agent_runtime: to_string(runtime), cli_agent_session_id: session_id}
@@ -34,60 +34,25 @@ defmodule SymphonyElixir.AgentCli do
   defp start_port(runtime, workspace, prompt, opts) do
     worker_host = Keyword.get(opts, :worker_host)
 
-    cond do
-      is_binary(worker_host) ->
-        SSH.start_port(worker_host, shell_script(runtime, workspace, prompt, opts))
-
-      runtime == :antigravity and windows?() ->
-        start_windows_antigravity_port(workspace, prompt, opts)
-
-      true ->
-        case System.find_executable("bash") do
-          nil ->
-            {:error, :bash_not_found}
-
-          executable ->
-            port =
-              Port.open({:spawn_executable, String.to_charlist(executable)}, [
-                :binary,
-                :exit_status,
-                :stderr_to_stdout,
-                args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt, opts))],
-                cd: String.to_charlist(workspace)
-              ])
-
-            {:ok, port}
-        end
-    end
-  end
-
-  defp start_windows_antigravity_port(workspace, prompt, opts) do
-    with powershell when is_binary(powershell) <- windows_powershell_command(),
-         cmd when is_binary(cmd) <- System.find_executable("cmd.exe") || System.find_executable("cmd") do
-      command_line =
-        [
-          powershell,
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-EncodedCommand",
-          powershell_encoded_command(windows_antigravity_script(workspace, prompt, opts))
-        ]
-        |> Enum.join(" ")
-
-      port =
-        Port.open({:spawn_executable, String.to_charlist(cmd)}, [
-          :binary,
-          :exit_status,
-          :stderr_to_stdout,
-          args: [~c"/d", ~c"/c", String.to_charlist(command_line)],
-          cd: String.to_charlist(workspace)
-        ])
-
-      {:ok, port}
+    if is_binary(worker_host) do
+      SSH.start_port(worker_host, shell_script(runtime, workspace, prompt, opts))
     else
-      nil ->
-        {:error, :windows_shell_not_found}
+      case System.find_executable("bash") do
+        nil ->
+          {:error, :bash_not_found}
+
+        executable ->
+          port =
+            Port.open({:spawn_executable, String.to_charlist(executable)}, [
+              :binary,
+              :exit_status,
+              :stderr_to_stdout,
+              args: [~c"-c", String.to_charlist(shell_script(runtime, workspace, prompt, opts))],
+              cd: String.to_charlist(workspace)
+            ])
+
+          {:ok, port}
+      end
     end
   end
 
@@ -108,34 +73,9 @@ defmodule SymphonyElixir.AgentCli do
     |> Enum.join("\n")
   end
 
-  defp windows_antigravity_script(workspace, prompt, opts) do
-    settings = Config.runtime_settings(:antigravity)
-    model = Keyword.get(opts, :model)
-    command = if model, do: "#{settings.command} --model=#{model}", else: settings.command
-    command = headless_command(:antigravity, command)
-
-    [
-      "$ErrorActionPreference = 'Stop'",
-      "Set-Location -LiteralPath #{powershell_string(workspace)}",
-      "$promptFile = Join-Path (Get-Location) ('.symphony-antigravity-prompt.' + [System.IO.Path]::GetRandomFileName())",
-      "function Quote-ForPowerShell([string]$Value) { \"'\" + $Value.Replace(\"'\", \"''\") + \"'\" }",
-      "try {",
-      "  [System.IO.File]::WriteAllText($promptFile, [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(#{powershell_string(Base.encode64(prompt))})), [System.Text.Encoding]::UTF8)",
-      "  $prompt = Get-Content -Raw -LiteralPath $promptFile",
-      "  Invoke-Expression (#{powershell_string(command)} + ' -p ' + (Quote-ForPowerShell $prompt))",
-      "  exit $LASTEXITCODE",
-      "} finally {",
-      "  Remove-Item -LiteralPath $promptFile -Force -ErrorAction SilentlyContinue",
-      "}"
-    ]
-    |> Enum.join("\n")
-  end
-
-
-
-  defp launch_command(:antigravity, %{command: command}, model) do
+  defp launch_command(:gemini, %{command: command}, model) do
     command = if model, do: "#{command} --model=#{model}", else: command
-    "#{headless_command(:antigravity, command)} -p \"$(cat \"$prompt_file\")\""
+    "#{headless_command(:gemini, command)} -p \"$(cat \"$prompt_file\")\""
   end
 
   defp launch_command(runtime, %{command: command, prompt_mode: "argument"}, model) do
@@ -167,10 +107,11 @@ defmodule SymphonyElixir.AgentCli do
     |> ensure_flag(~r/(^|\s)--approve-mcps(\s|$)/, "--approve-mcps")
   end
 
-
-
-  defp headless_command(:antigravity, command) do
-    ensure_flag(command, ~r/(^|\s)--dangerously-skip-permissions(\s|$)/, "--dangerously-skip-permissions")
+  defp headless_command(:gemini, command) do
+    command
+    |> ensure_flag(~r/(^|\s)--skip-trust(\s|$)/, "--skip-trust")
+    |> ensure_flag(~r/(^|\s)(--approval-mode(\s|=)|--yolo(\s|$)|-y(\s|$))/, "--approval-mode yolo")
+    |> ensure_json_output("stream-json")
   end
 
   defp ensure_flag(command, pattern, flag) do
@@ -308,7 +249,11 @@ defmodule SymphonyElixir.AgentCli do
     {lines, pending_line}
   end
 
-
+  defp interactive_prompt_reason(:gemini, output) do
+    if String.contains?(output, "Opening authentication page in your browser") or String.contains?(output, "Do you want to continue? [Y/n]") do
+      {:cli_agent_interactive_prompt, :gemini, :authentication}
+    end
+  end
 
   defp interactive_prompt_reason(_runtime, _output), do: nil
 
@@ -419,27 +364,4 @@ defmodule SymphonyElixir.AgentCli do
   defp issue_context(%{id: issue_id, identifier: identifier}), do: "issue_id=#{issue_id} issue_identifier=#{identifier}"
 
   defp shell_escape(value), do: "'" <> String.replace(value, "'", "'\"'\"'") <> "'"
-
-  defp powershell_string(value), do: "'" <> String.replace(value, "'", "''") <> "'"
-
-  defp powershell_encoded_command(script) do
-    script
-    |> :unicode.characters_to_binary(:utf8, {:utf16, :little})
-    |> Base.encode64()
-  end
-
-  defp windows_powershell_command do
-    cond do
-      System.find_executable("powershell.exe") -> "powershell.exe"
-      System.find_executable("powershell") -> "powershell"
-      true -> nil
-    end
-  end
-
-  defp windows? do
-    case :os.type() do
-      {:win32, _name} -> true
-      _ -> false
-    end
-  end
 end

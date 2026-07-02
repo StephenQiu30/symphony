@@ -273,11 +273,11 @@ defmodule SymphonyElixir.AgentRunner do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
   end
 
-  defp validate_cli_runtime_command(runtime) when runtime in [:claude, :cursor, :antigravity] do
+  defp validate_cli_runtime_command(runtime) when runtime in [:claude, :cursor, :gemini] do
     validate_cli_runtime_command_exists(runtime)
   end
 
-  defp validate_cli_runtime_command_exists(runtime) when runtime in [:claude, :cursor, :antigravity] do
+  defp validate_cli_runtime_command_exists(runtime) when runtime in [:claude, :cursor, :gemini] do
     case Config.runtime_settings(runtime).command do
       command when is_binary(command) and command != "" ->
         :ok

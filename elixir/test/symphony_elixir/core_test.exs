@@ -1881,52 +1881,174 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "cli agent runs antigravity one-shot prompt" do
-    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-antigravity-cli-#{System.unique_integer([:positive])}")
+  test "cli agent fails fast when gemini prints an interactive auth prompt without newline" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-gemini-auth-prompt-#{System.unique_integer([:positive])}")
+    previous_gemini_api_key = System.get_env("GEMINI_API_KEY")
+    previous_google_api_key = System.get_env("GOOGLE_API_KEY")
 
     try do
+      System.put_env("GEMINI_API_KEY", "test-key")
+      System.delete_env("GOOGLE_API_KEY")
+
       workspace = Path.join(test_root, "workspace")
-      antigravity_binary = Path.join(test_root, "fake-agy")
-      trace_file = Path.join(test_root, "antigravity.trace")
+      gemini_binary = Path.join(test_root, "fake-gemini-auth-prompt")
+
       File.mkdir_p!(workspace)
 
-      File.write!(antigravity_binary, """
+      File.write!(gemini_binary, """
       #!/bin/sh
-      printf 'ARGV:%s\\n' "$*" >> "#{trace_file}"
-      if [ "$1" != "--dangerously-skip-permissions" ] || [ "$2" != "-p" ] || [ "$3" != "hello" ]; then
-        printf 'unexpected antigravity argv: %s\\n' "$*" >&2
-        exit 42
-      fi
-      printf '%s\\n' 'Antigravity completed the task.'
+      printf 'Opening authentication page in your browser. Do you want to continue? [Y/n]:'
+      sleep 5
       """)
 
-      File.chmod!(antigravity_binary, 0o755)
+      File.chmod!(gemini_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: Path.join(test_root, "workspaces"),
+        max_turns: 1
+      )
 
       File.write!(Workflow.workflow_file_path(), """
       ---
       tracker:
         kind: memory
-      antigravity:
-        command: "#{antigravity_binary} --dangerously-skip-permissions"
+      workspace:
+        root: "#{Path.join(test_root, "workspaces")}"
+      agent:
+        default_runtime: gemini
+        max_turns: 1
+      gemini:
+        command: "#{gemini_binary}"
+        turn_timeout_ms: 100
       ---
-      Antigravity prompt body.
+      Test Gemini auth prompt
+      """)
+
+      SymphonyElixir.WorkflowStore.force_reload()
+
+      issue = %Issue{id: "issue-gemini-auth-prompt", identifier: "STE-auth-prompt", title: "Auth prompt", description: "Gemini auth prompt should fail fast", state: "In Progress", labels: []}
+
+      assert {:error, {:cli_agent_interactive_prompt, :gemini, :authentication}} =
+               SymphonyElixir.AgentCli.run(:gemini, workspace, "hello", issue)
+    after
+      restore_env("GEMINI_API_KEY", previous_gemini_api_key)
+      restore_env("GOOGLE_API_KEY", previous_google_api_key)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent parses gemini usage payload and removes temporary prompt file" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-gemini-cli-#{System.unique_integer([:positive])}")
+    previous_gemini_api_key = System.get_env("GEMINI_API_KEY")
+    previous_google_api_key = System.get_env("GOOGLE_API_KEY")
+
+    try do
+      System.put_env("GEMINI_API_KEY", "test-key")
+      System.delete_env("GOOGLE_API_KEY")
+
+      workspace = Path.join(test_root, "workspace")
+      gemini_binary = Path.join(test_root, "fake-gemini")
+      trace_file = Path.join(test_root, "gemini.trace")
+      File.mkdir_p!(workspace)
+
+      File.write!(gemini_binary, """
+      #!/bin/sh
+      printf 'ARGV:%s\\n' "$*" >> "#{trace_file}"
+      if [ "$1" != "--skip-trust" ] || [ "$2" != "--approval-mode" ] || [ "$3" != "yolo" ] || [ "$4" != "--output-format" ] || [ "$5" != "stream-json" ] || [ "$6" != "-p" ] || [ "$7" != "hello" ]; then
+        printf 'unexpected gemini argv: %s\\n' "$*" >&2
+        exit 42
+      fi
+      printf '%s\\n' '{"type":"init","session_id":"gemini-session","model":"auto"}'
+      printf '%s\\n' '{"type":"message","role":"assistant","content":"done","delta":true}'
+      printf '%s\\n' '{"type":"result","status":"success","stats":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}'
+      """)
+
+      File.chmod!(gemini_binary, 0o755)
+
+      File.write!(Workflow.workflow_file_path(), """
+      ---
+      tracker:
+        kind: memory
+      gemini:
+        command: "#{gemini_binary}"
+      ---
+      Gemini prompt body.
       """)
 
       WorkflowStore.force_reload()
+      parent = self()
 
-      issue = %Issue{id: "issue-antigravity", identifier: "STE-AGY", title: "Run Antigravity", description: "Antigravity should run one-shot", state: "In Progress", labels: []}
+      issue = %Issue{id: "issue-gemini-json", identifier: "STE-46", title: "Parse Gemini JSON", description: "Gemini JSON should be structured", state: "In Progress", labels: []}
 
-      assert {:ok, %{result: :turn_completed, session_id: session_id}} =
-               SymphonyElixir.AgentCli.run(:antigravity, workspace, "hello", issue)
+      assert {:ok, %{result: :turn_completed, session_id: "gemini-session"}} =
+               SymphonyElixir.AgentCli.run(:gemini, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
 
-      assert String.starts_with?(session_id, "antigravity-")
+      assert_receive {:agent_message,
+                      %{
+                        event: :turn_completed,
+                        cli_agent_runtime: "gemini",
+                        session_id: "gemini-session",
+                        payload: %{"usage" => %{"input_tokens" => 13, "output_tokens" => 8, "total_tokens" => 21}}
+                      }}
 
-      trace = File.read!(trace_file)
-      assert trace =~ "--dangerously-skip-permissions -p hello"
-      refute trace =~ "--output-format stream-json"
-      refute trace =~ "--approval-mode yolo"
-      assert [] = Path.wildcard(Path.join(workspace, ".symphony-antigravity-prompt.*"))
+      assert File.read!(trace_file) =~ "--skip-trust --approval-mode yolo --output-format stream-json -p hello"
+      assert [] = Path.wildcard(Path.join(workspace, ".symphony-gemini-prompt.*"))
     after
+      restore_env("GEMINI_API_KEY", previous_gemini_api_key)
+      restore_env("GOOGLE_API_KEY", previous_google_api_key)
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "cli agent treats gemini error result payload as the exit reason" do
+    test_root = Path.join(System.tmp_dir!(), "symphony-elixir-gemini-cli-error-#{System.unique_integer([:positive])}")
+    previous_gemini_api_key = System.get_env("GEMINI_API_KEY")
+    previous_google_api_key = System.get_env("GOOGLE_API_KEY")
+
+    try do
+      System.put_env("GEMINI_API_KEY", "test-key")
+      System.delete_env("GOOGLE_API_KEY")
+
+      workspace = Path.join(test_root, "workspace")
+      gemini_binary = Path.join(test_root, "fake-gemini")
+      File.mkdir_p!(workspace)
+
+      File.write!(gemini_binary, """
+      #!/bin/sh
+      printf '%s\\n' '{"type":"init","session_id":"gemini-error-session","model":"auto"}'
+      printf '%s\\n' '{"type":"result","status":"error","error":{"type":"quota","message":"quota exhausted"},"stats":{"input_tokens":13,"output_tokens":8,"total_tokens":21}}'
+      exit 1
+      """)
+
+      File.chmod!(gemini_binary, 0o755)
+
+      File.write!(Workflow.workflow_file_path(), """
+      ---
+      tracker:
+        kind: memory
+      gemini:
+        command: "#{gemini_binary}"
+      ---
+      Gemini prompt body.
+      """)
+
+      WorkflowStore.force_reload()
+      parent = self()
+
+      issue = %Issue{id: "issue-gemini-error-json", identifier: "STE-47", title: "Parse Gemini error JSON", description: "Gemini JSON errors should be structured", state: "In Progress", labels: []}
+
+      assert {:error, {:cli_agent_failed, :gemini, %{"status" => "error", "error" => %{"message" => "quota exhausted"}}}} =
+               SymphonyElixir.AgentCli.run(:gemini, workspace, "hello", issue, on_message: fn message -> send(parent, {:agent_message, message}) end)
+
+      assert_receive {:agent_message,
+                      %{
+                        event: :turn_ended_with_error,
+                        cli_agent_runtime: "gemini",
+                        reason: {:cli_agent_failed, :gemini, %{"status" => "error", "error" => %{"message" => "quota exhausted"}}}
+                      }}
+    after
+      restore_env("GEMINI_API_KEY", previous_gemini_api_key)
+      restore_env("GOOGLE_API_KEY", previous_google_api_key)
       File.rm_rf(test_root)
     end
   end

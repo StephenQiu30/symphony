@@ -27,7 +27,7 @@ hooks:
   before_remove: |
     cd elixir && mise exec -- mix workspace.before_remove
 agent:
-  default_runtime: antigravity
+  default_runtime: codex
   max_concurrent_agents: 4
   max_turns: 20
   runtime_by_label:
@@ -102,7 +102,7 @@ Symphony selects the agent runtime from Linear labels configured in `agent.runti
 - `reviewer:cursor` → Cursor CLI during `Agent Review`
 - `reviewer:antigravity` → Antigravity CLI during `Agent Review`
 
-When no matching label is present, Symphony uses `agent.default_runtime` (`antigravity` by default).
+When no matching label is present, Symphony uses `agent.default_runtime` (`codex` by default).
 When the issue is in `Agent Review`, `reviewer:*` labels take precedence over `agent:*` labels so the implementation agent and reviewing agent can differ.
 
 ### Antigravity runtime

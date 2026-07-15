@@ -38,7 +38,7 @@ agent:
     reviewer:claude: claude
     reviewer:cursor: cursor
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.6-sol"' --config model_reasoning_effort=xhigh app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:

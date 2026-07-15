@@ -592,7 +592,7 @@ not require recognizing or validating extension fields unless that extension is 
 - `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined
 - `codex.turn_sandbox_policy`: Codex `SandboxPolicy` value, default implementation-defined
 - `codex.turn_timeout_ms`: integer, default `3600000`
-- `codex.read_timeout_ms`: integer, default `5000`
+- `codex.read_timeout_ms`: integer, default `30000`
 - `codex.stall_timeout_ms`: integer, default `300000`
 
 ## 7. Orchestration State Machine
@@ -1113,6 +1113,10 @@ Error mapping (RECOMMENDED normalized categories):
 - `turn_failed`
 - `turn_cancelled`
 - `turn_input_required`
+
+Codex `error` notifications with `willRetry: false` MUST terminate the current turn as a failure,
+even if the app-server subsequently emits `turn/completed`. Notifications with `willRetry: true`
+remain non-terminal because Codex owns the in-turn retry.
 
 ### 10.7 Agent Runner Contract
 

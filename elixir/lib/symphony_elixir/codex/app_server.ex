@@ -378,6 +378,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     payload_string = to_string(data)
 
     case Jason.decode(payload_string) do
+      {:ok, %{"method" => "error", "params" => %{"willRetry" => false} = params} = payload} ->
+        emit_turn_event(on_message, :turn_failed, payload, payload_string, port, params)
+        {:error, {:turn_failed, params}}
+
       {:ok, %{"method" => "turn/completed"} = payload} ->
         emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
         {:ok, :turn_completed}

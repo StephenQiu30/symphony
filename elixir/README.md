@@ -139,6 +139,10 @@ Notes:
   by the Codex turn sandbox.
 - `agent.max_turns` caps how many back-to-back agent turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `codex.read_timeout_ms` allows app-server startup and synchronous requests to wait for cold model
+  metadata and MCP initialization. Default: `30000`.
+- A Codex `error` notification with `willRetry: false` fails the turn immediately; Symphony does not
+  treat a following `turn/completed` notification as successful work.
 - Multi-agent routing is configured in `WORKFLOW.md`:
   - `agent.default_runtime` selects Codex when no label matches (`codex` by default).
   - `agent.runtime_by_label` maps Linear labels such as `agent:cursor` to `codex`, `claude`, or `cursor`.
